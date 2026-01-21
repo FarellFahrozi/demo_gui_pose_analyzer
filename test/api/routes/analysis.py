@@ -69,6 +69,7 @@ async def analyze_posture(
             posture_score=analysis_data.get("posture_score"),
             postural_angles=analysis_data.get("postural_angles"),
             detections=analysis_data.get("detections"),
+            keypoints=analysis_data.get("keypoints"),
             conversion_ratio=analysis_data.get("conversion_ratio"),
             actual_height_mm=analysis_data.get("actual_height_mm")
         )
@@ -109,6 +110,7 @@ async def get_analysis(analysis_id: str):
             posture_score=analysis.get("posture_score"),
             postural_angles=analysis.get("postural_angles"),
             detections=analysis.get("detections"),
+            keypoints=db_service.get_keypoints(analysis_id),
             conversion_ratio=analysis.get("conversion_ratio"),
             actual_height_mm=analysis.get("actual_height_mm")
         )
@@ -179,6 +181,7 @@ async def batch_analyze_postures(
                     posture_score=analysis_data.get("posture_score"),
                     postural_angles=analysis_data.get("postural_angles"),
                     detections=analysis_data.get("detections"),
+                    keypoints=analysis_data.get("keypoints"),
                     conversion_ratio=analysis_data.get("conversion_ratio"),
                     actual_height_mm=analysis_data.get("actual_height_mm")
                 )

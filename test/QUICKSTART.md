@@ -1,103 +1,60 @@
 # Quick Start Guide
 
-Get the KURO Performance Postural Assessment System running in 5 minutes!
+Get the AI Postural Assessment System running in 5 minutes!
 
-## Step 1: Install Dependencies (2 minutes)
+## Step 1: Install Dependencies
 
 ```bash
-cd posture-analysis-system
 pip install -r requirements.txt
 ```
 
-<!-- ## Step 2: Configure Environment (1 minute)
+## Step 2: Configure Environment
 
 1. Copy the example environment file:
    ```bash
    cp .env.example .env
    ```
+2. The system is pre-configured for local SQLite. No database setup is required!
 
-2. Edit `.env` and add your Supabase credentials:
-   ```env
-   SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_KEY=your-anon-key-here -->
-   ```
+## Step 3: Add Your Model and Logo
 
-## Step 3: Add Your Model and Logo (1 minute)
-
-1. Place your YOLO model:
+1. Place your YOLO model in the `models/` folder:
    ```bash
-   cp /path/to/your/model.pt models/yolo_model.pt
+   # Name it 'best.pt' or update .env
+   cp /path/to/your/model.pt models/best.pt
    ```
 
-2. Place the logo (optional):
+2. Place your logo (optional):
    ```bash
    cp /path/to/logo.png assets/logo.png
    ```
 
-## Step 4: Run the Application (30 seconds)
+## Step 4: Run the Application
 
 ### Option A: Desktop GUI
-
 ```bash
 python run_gui.py
 ```
 
 ### Option B: REST API
-
 ```bash
 python run_api.py
 ```
-
-API will be available at: http://localhost:8000/docs
+API docs available at: http://127.0.0.1:8000/docs
 
 ## Step 5: Test It Out!
 
 ### GUI Application:
-1. Enter patient name and height
-2. Click "Continue"
-3. Upload a posture image
-4. Click "Analyze Posture"
-5. View results in the tabs
-
-### API:
-Visit http://localhost:8000/docs and try the interactive API documentation.
-
-Example API call:
-```bash
-curl -X POST "http://localhost:8000/api/analysis/analyze" \
-  -F "image=@test_image.jpg" \
-  -F "patient_name=John Doe" \
-  -F "height_cm=170"
-```
-
-## Running in VSCode
-
-1. Open the `posture-analysis-system` folder in VSCode
-2. Press `F5` or go to Run → Start Debugging
-3. Select either "Run GUI Application" or "Run API Server"
-
-## Need Help?
-
-- See `SETUP_GUIDE.md` for detailed setup instructions
-- See `README.md` for full documentation
-- Check the API docs at http://localhost:8000/docs
-
-## System Requirements
-
-- Python 3.9+
-- 4GB RAM minimum
-- Internet connection (for Supabase)
-- YOLO pose estimation model
+2. Select a posture image using the browser.
+3. Click **Analyze Posture** and view the medical-grade visualizations.
 
 ## Common Issues
 
 **Model not found?**
-→ Place your model at `models/yolo_model.pt`
+→ Ensure your model is at `models/best.pt` or check the `MODEL_PATH` in `.env`.
 
-**Database connection error?**
-→ Check your Supabase credentials in `.env`
+**Tkinter error?**
+→ On Linux, run: `sudo apt-get install python3-tk`.
 
-**GUI won't start?**
-→ Install tkinter: `sudo apt-get install python3-tk` (Linux)
-
-That's it! You're ready to analyze postures with KURO Performance!
+**Database error?**
+→ The system will automatically create `kuro_posture.db` on first run. Ensure you have write permissions in the folder.

@@ -27,7 +27,6 @@ posture-analysis-system/
 │   └── visualizer.py      # Visualization functions
 ├── assets/                # Images, fonts, resources
 ├── models/                # ML models (YOLO)
-├── uploads/               # Temporary uploads
 └── results/               # Analysis results
 
 ```

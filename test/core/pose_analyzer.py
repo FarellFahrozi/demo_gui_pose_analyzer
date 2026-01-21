@@ -12,11 +12,12 @@ class AdvancedPoseAnalyzer:
         self.HEIGHT_DIFF_SCALE = 0.15  # Scale for shoulder/hip height differences
         self.LATERAL_DEVIATION_SCALE = 0.12  # Scale for spinal lateral deviation
         self.HEAD_SHIFT_SCALE = 0.18  # Scale for head shift measurements
+        # Updated 8-point mapping for Kuro model:
+        # Sides are grouped: Right (0-3), Left (4-7)
+        # Order per side: Shoulder, Hip, Knee, Ankle
         self.keypoint_mapping = {
-            'nose': 0, 'left_eye': 1, 'right_eye': 2, 'left_ear': 3, 'right_ear': 4,
-            'left_shoulder': 5, 'right_shoulder': 6, 'left_elbow': 7, 'right_elbow': 8,
-            'left_wrist': 9, 'right_wrist': 10, 'left_hip': 11, 'right_hip': 12,
-            'left_knee': 13, 'right_knee': 14, 'left_ankle': 15, 'right_ankle': 16
+            'right_shoulder': 0, 'right_hip': 1, 'right_knee': 2, 'right_ankle': 3,
+            'left_shoulder': 4, 'left_hip': 5, 'left_knee': 6, 'left_ankle': 7
         }
 
     def _debug_print(self, message):
@@ -50,7 +51,7 @@ class AdvancedPoseAnalyzer:
                         if idx < len(kp):
                             x, y = kp[idx]
                             confidence = conf[idx] if conf is not None and idx < len(conf) else 1.0
-                            visible = confidence > 0.3
+                            visible = bool(confidence > 0.5)
                             keypoints_dict[name] = {
                                 'x': float(x), 'y': float(y),
                                 'confidence': float(confidence), 'visible': visible
@@ -101,8 +102,23 @@ class AdvancedPoseAnalyzer:
             min_head_y = min(head_points)
             max_ankle_y = max(ankle_points)
             height_px = max_ankle_y - min_head_y
-            self._debug_print(f"Person height in pixels: {height_px:.1f}")
+            self._debug_print(f"Person height in pixels (head-ankle): {height_px:.1f}")
             return height_px if height_px > 100 else None
+        
+        # Fallback to shoulder-ankle height if head is missing
+        shoulder_points = []
+        for kp_name in ['left_shoulder', 'right_shoulder']:
+            if kp_name in keypoints_dict and keypoints_dict[kp_name] and keypoints_dict[kp_name]['visible']:
+                shoulder_points.append(keypoints_dict[kp_name]['y'])
+        
+        if shoulder_points and ankle_points:
+            min_sh_y = min(shoulder_points)
+            max_ankle_y = max(ankle_points)
+            # Add ~20% for head height if using shoulder
+            height_px = (max_ankle_y - min_sh_y) * 1.25 
+            self._debug_print(f"Person height in pixels (shoulder-ankle scaled): {height_px:.1f}")
+            return height_px if height_px > 100 else None
+            
         return None
 
     def calculate_angle(self, point_a, point_b, point_c):

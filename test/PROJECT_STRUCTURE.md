@@ -20,59 +20,36 @@ posture-analysis-system/
 │
 ├── assets/                           # Static assets
 │   ├── logo.png                      # KURO Performance logo
-│   ├── LOGO_NOTE.md                  # Instructions for logo
-│   └── fonts/                        # Custom fonts (if needed)
+│   └── logo_dark.png                 # Alternative logo
 │
 ├── models/                           # Machine learning models
-│   ├── yolo_model.pt                 # YOLO pose estimation model
-│   └── .gitkeep
-│
-├── uploads/                          # Temporary image uploads
-│   └── .gitkeep
-│
-├── results/                          # Analysis results
+│   ├── best.pt                       # YOLO pose estimation model (8-keypoints)
 │   └── .gitkeep
 │
 ├── core/                             # Core analysis logic
 │   ├── __init__.py
-│   ├── pose_analyzer.py              # AdvancedPoseAnalyzer class
+│   ├── pose_analyzer.py              # Advanced 8-keypoint analyzer
 │   └── visualizer.py                 # Visualization functions
 │
-├── gui/                              # Desktop GUI application
-│   ├── __init__.py
+├── gui/                              # Desktop GUI application (Tkinter)
 │   ├── main_gui.py                   # Main GUI application
-│   │
-│   ├── screens/                      # GUI screens
-│   │   ├── __init__.py
-│   │   ├── landing.py                # Landing/input screen
-│   │   ├── upload.py                 # Image upload screen
-│   │   └── results.py                # Results display screen
-│   │
-│   └── components/                   # Reusable GUI components
-│       ├── __init__.py
-│       └── widgets.py                # Custom widgets
+│   └── screens/                      # GUI screens
+│       ├── landing.py                # Patient input screen
+│       ├── upload.py                 # Image upload screen
+│       └── results.py                # Comprehensive results visualization
 │
-└── api/                              # REST API application
-    ├── __init__.py
-    ├── main.py                       # FastAPI application entry point
-    │
-    ├── routes/                       # API endpoints
-    │   ├── __init__.py
-    │   ├── analysis.py               # Analysis endpoints
-    │   └── patients.py               # Patient management endpoints
-    │
-    ├── models/                       # Data models
-    │   ├── __init__.py
-    │   └── schemas.py                # Pydantic schemas
-    │
-    ├── services/                     # Business logic
-    │   ├── __init__.py
-    │   ├── analyzer.py               # Posture analysis service
-    │   └── database.py               # Supabase database service
-    │
-    └── utils/                        # Utilities
-        ├── __init__.py
-        └── helpers.py                # Helper functions
+├── api/                              # REST API application (FastAPI)
+│   ├── main.py                       # FastAPI entry point
+│   ├── routes/                       # API endpoints
+│   └── services/                     # Business logic (DB & Analysis)
+│
+├── scripts/                          # Utility scripts
+│   └── debug/                        # Detection & Keypoint debugging
+│       ├── debug_yolo.py             # Coordinate verification script
+│       └── debug_keypoints_labeled.png
+│
+├── kuro_posture.db                   # Local SQLite Database
+└── results/                          # Exported analysis results
 ```
 
 ## Directory Descriptions
@@ -82,108 +59,48 @@ posture-analysis-system/
 - **run_gui.py**: Entry point for desktop GUI application
 - **run_api.py**: Entry point for REST API server
 - **requirements.txt**: All Python package dependencies
-- **.env**: Configuration (Supabase credentials, API settings)
+- **kuro_posture.db**: Local SQLite database for persistent storage
 
 ### /assets
 
-Static resources like images, logos, and fonts used by the GUI.
+Static resources like images and logos used by the GUI.
 
 ### /models
 
-Machine learning models, specifically the YOLO pose estimation model.
-
-### /uploads
-
-Temporary storage for uploaded images during analysis. Files are deleted after processing.
-
-### /results
-
-Saved analysis results exported as JSON files.
+Machine learning models, specifically the `best.pt` YOLO pose estimation model tailored for postural assessment.
 
 ### /core
 
-Core posture analysis logic that is shared between GUI and API:
-- **pose_analyzer.py**: Main analysis engine with AdvancedPoseAnalyzer class
-- **visualizer.py**: Functions for creating visual representations
+Core posture analysis logic shared between GUI and API:
+- **pose_analyzer.py**: Main analysis engine optimized for 8 structural keypoints.
 
 ### /gui
 
-Desktop application built with tkinter:
-- **main_gui.py**: Application entry point and screen management
-- **screens/**: Individual screens matching PDF design
-  - **landing.py**: Patient information input
-  - **upload.py**: Image upload and analysis trigger
-  - **results.py**: Results visualization
-- **components/**: Reusable UI components
+Desktop application built with tkinter, following a modern dark-themed aesthetic.
 
 ### /api
 
-REST API built with FastAPI:
-- **main.py**: API application setup and configuration
-- **routes/**: API endpoint definitions
-  - **analysis.py**: Image analysis endpoints
-  - **patients.py**: Patient management endpoints
-- **models/**: Request/response schemas using Pydantic
-- **services/**: Business logic layer
-  - **analyzer.py**: Wraps core analyzer for API use
-  - **database.py**: Supabase database operations
+REST API built with FastAPI for potential web integration and batch processing.
+
+### /scripts/debug
+
+Contains tools for verifying model accuracy and keypoint mapping.
 
 ## Key Features by Component
 
-### GUI Application
-- Modern black-themed design matching KURO branding
-- Three-screen workflow: Input → Upload → Results
-- Before/after comparison visualizations
-- Detailed angle analysis charts
-- Results table with recommendations
-- Export functionality
+### Analysis Engine
+- **8-Keypoint Focus**: Shoulders, Hips, Knees, Ankles.
+- **Visual Evidence**: Plumb Line, Pelvic Line, Spine Connection.
+- **Metric Precision**: mm-accurate measurements and degree-based tilts.
 
-### REST API
-- RESTful endpoints for posture analysis
-- Patient management system
-- Batch processing support
-- Supabase database integration
-- Auto-generated API documentation (Swagger)
-- Health check endpoint
-
-### Core Analysis Engine
-- YOLO-based keypoint detection
-- Shoulder, hip, spinal, and head analysis
-- Pixel-to-mm conversion for accurate measurements
-- Postural angle calculations
-- Overall posture scoring
-- Detailed recommendations
-
-## Data Flow
-
-### GUI Flow
-1. User enters patient info on landing screen
-2. User uploads image on upload screen
-3. Analysis runs in background thread
-4. Results displayed in results screen
-5. User can export results to JSON
-
-### API Flow
-1. Client sends POST request with image and patient data
-2. Image saved temporarily
-3. Patient created/retrieved from database
-4. Analysis performed using core engine
-5. Results saved to Supabase
-6. Response returned to client
-7. Temporary image deleted
-
-## Database Schema
-
-Supabase tables:
-- **patients**: Patient records (name, height)
-- **analyses**: Analysis results (all measurements)
-- **keypoints**: Extracted pose keypoints
+### Data Management
+- **Local Persistence**: Using SQLite for fast, offline-capable storage.
+- **History Tracking**: Ability to associate multiple analyses with one patient.
 
 ## Technologies Used
 
-- **GUI**: tkinter, matplotlib, Pillow
-- **API**: FastAPI, uvicorn
-- **ML**: PyTorch, Ultralytics YOLO
-- **Database**: Supabase (PostgreSQL)
-- **Image Processing**: OpenCV
-- **Data**: NumPy, pandas, scipy
+- **GUI**: Tkinter, Matplotlib, Pillow
+- **API**: FastAPI, Uvicorn
+- **ML**: Ultralytics YOLOv8
+- **Database**: SQLite
+- **Processing**: OpenCV, NumPy, SciPy

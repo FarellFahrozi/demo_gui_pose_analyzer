@@ -73,6 +73,7 @@ class AnalysisResult(BaseModel):
     posture_score: Optional[Dict]
     postural_angles: Optional[Dict]
     detections: Optional[Dict]
+    keypoints: Optional[Dict]
     conversion_ratio: Optional[float]
     actual_height_mm: Optional[float]
 

@@ -9,10 +9,11 @@ import warnings
 import glob
 
 warnings.filterwarnings('ignore')
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core import AdvancedPoseAnalyzer
+from gui.utils.api_client import ApiClient
 
 class UploadScreen(ttk.Frame):
     def __init__(self, parent, app):
@@ -21,19 +22,20 @@ class UploadScreen(ttk.Frame):
         self.parent = parent
         self.pack(fill=tk.BOTH, expand=True)
 
+        self.api_client = ApiClient()
         self.image_path = None
         self.batch_images = []
         self.current_batch_index = 0
-        self.model = None
-        self.model_path = None
         self.analyzing = False
-        self.analysis_mode = 'single'  # 'single', 'batch', 'history'
-        self.confidence_threshold = 0.25  # Default confidence threshold
+        self.analysis_mode = 'single'
+        self.confidence_threshold = 0.25
         self.current_keypoints = None
+        self.api_connected = False
 
         self._setup_styles()
         self._create_widgets()
-        self._load_model()
+        self._check_api_health()
+
 
     def _setup_styles(self):
         style = ttk.Style()
@@ -278,107 +280,29 @@ class UploadScreen(ttk.Frame):
             self.model_status_label.config(text="Model: Loading...", fg='#FFCC00')
             threading.Thread(target=self._load_specific_model, args=(file_path,), daemon=True).start()
 
-    def _load_model(self):
-        threading.Thread(target=self._load_model_thread, daemon=True).start()
+    def _check_api_health(self):
+        threading.Thread(target=self._check_api_health_thread, daemon=True).start()
 
-    def _load_model_thread(self):
-        try:
-            possible_paths = [
-                'best.pt',
-                'runs\\detect\\train\\weights\\best.pt',
-                'runs\\train\\weights\\best.pt',
-                'weights\\best.pt',
-                'models\\best.pt',
-                os.path.join(os.path.dirname(__file__), '..\\..\\models\\best.pt'),
-                os.path.join(os.path.dirname(__file__), '..\\models\\best.pt'),
-                os.path.join(os.path.dirname(__file__), 'models\\best.pt'),
-                os.path.join(os.getcwd(), 'models', 'best.pt'),
-                os.path.join(os.getcwd(), 'best.pt'),
-                os.path.expanduser('~/best.pt'),
-                os.path.expanduser('~/Downloads/best.pt'),
-            ]
-            
-            found_model = None
-            for model_path in possible_paths:
-                if os.path.exists(model_path):
-                    found_model = model_path
-                    print(f"✅ Model found: {found_model}")
-                    break
-            
-            if found_model:
-                self._load_specific_model(found_model)
-            else:
-                print("❌ Model not found")
-                self.parent.after(0, lambda: self.model_status_label.config(
-                    text="Model: Not Found",
-                    fg='#FF6666'
-                ))
-                self.parent.after(0, lambda: self.status_label.config(
-                    text="Please upload a YOLO model using the 'Upload YOLO Model' button"
-                ))
-                
-        except Exception as e:
-            print(f"❌ Error loading model: {str(e)}")
-            import traceback
-            traceback.print_exc()
+    def _check_api_health_thread(self):
+        self.parent.after(0, lambda: self.model_status_label.config(text="API: Checking...", fg='#FFCC00'))
+        is_healthy = self.api_client.health_check()
+        self.api_connected = is_healthy
+        
+        if is_healthy:
+            self.parent.after(0, lambda: self.model_status_label.config(text="API: Connected", fg='#00FF00'))
+            self.parent.after(0, lambda: self.status_label.config(text="API Server Ready. Click 'ANALYSIS MENU' to select image."))
+            if self.image_path:
+                self.parent.after(0, lambda: self.analyze_button.config(state=tk.NORMAL))
+        else:
+            self.parent.after(0, lambda: self.model_status_label.config(text="API: Disconnected", fg='#FF6666'))
+            self.parent.after(0, lambda: self.status_label.config(text="⚠️ API Server Offline. Please run 'python run_api.py' first."))
+            self.parent.after(0, lambda: self.analyze_button.config(state=tk.DISABLED))
+
 
     def _load_specific_model(self, model_path):
-        try:
-            print(f"\n🤖 LOADING MODEL (CPU MODE)")
-            print("="*50)
-            print(f"📁 Model path: {model_path}")
-            
-            try:
-                from ultralytics import YOLO
-                print("✅ Ultralytics installed")
-            except ImportError:
-                print("📦 Installing ultralytics...")
-                import subprocess
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "ultralytics"])
-                from ultralytics import YOLO
+        # We no longer load specific models locally in client-server mode
+        messagebox.showinfo("Note", "In Client-Server mode, models are managed by the API server.")
 
-            print("⏳ Loading YOLO model for CPU...")
-            model = YOLO(model_path)
-            model.to('cpu')
-            model.eval()
-            model.fp16 = False
-            
-            print(f"✅ Model loaded on CPU")
-            
-            if hasattr(model, 'names'):
-                num_classes = len(model.names)
-                print(f"🎯 Classes: {num_classes}")
-                for idx, name in model.names.items():
-                    print(f"   - {idx}: {name}")
-            
-            self.model = model
-            
-            model_name = os.path.basename(model_path)
-            num_classes = len(model.names) if hasattr(model, 'names') else 'Unknown'
-            
-            self.parent.after(0, lambda: self.model_status_label.config(
-                text=f"Model: {model_name}",
-                fg='#00FF00'
-            ))
-            
-            self.parent.after(0, lambda: self.status_label.config(
-                text=f"Model '{model_name}' loaded. Click 'ANALYSIS MENU' to select image."
-            ))
-            
-            if self.image_path:
-                self.analyze_button.config(state=tk.NORMAL)
-                self.analyze_button.config(text="🔍 ANALYZE POSTURE")
-            
-            print(f"✅ Model ready: {model_name}")
-            
-        except Exception as e:
-            print(f"❌ Error loading model: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.parent.after(0, lambda: self.model_status_label.config(
-                text="Model: Load Failed",
-                fg='#FF6666'
-            ))
 
     def _show_menu(self):
         menu = tk.Toplevel(self.parent)
@@ -463,12 +387,12 @@ class UploadScreen(ttk.Frame):
             self.current_keypoints = None # Reset garis ke tengah untuk gambar baru
             self._display_preview(file_path)
             
-            if self.model is not None:
+            if self.api_connected:
                 self.analyze_button.config(state=tk.NORMAL)
                 self.analyze_button.config(text="🔍 ANALYZE POSTURE")
             else:
                 self.analyze_button.config(state=tk.DISABLED)
-                self.analyze_button.config(text="⚠️ MODEL NOT LOADED")
+                self.analyze_button.config(text="⚠️ API NOT CONNECTED")
                 
             self.status_label.config(text=f"Image loaded: {os.path.basename(file_path)}")
 
@@ -788,7 +712,7 @@ class UploadScreen(ttk.Frame):
                 self.image_path = self.batch_images[0]
                 self._display_preview(self.image_path)
                 
-                if self.model is not None:
+                if self.api_connected:
                     self.analyze_button.config(state=tk.NORMAL, text=f"🔍 ANALYZE BATCH (1/{len(self.batch_images)})")
                 
                 self.status_label.config(text=f"📂 Batch: {len(self.batch_images)} images loaded | Folder: {os.path.basename(folder_path)}")
@@ -871,8 +795,8 @@ class UploadScreen(ttk.Frame):
             messagebox.showerror("Error", "Please select an image first using Analysis Menu")
             return
 
-        if self.model is None:
-            messagebox.showerror("Error", "Model not loaded yet")
+        if not self.api_connected:
+            messagebox.showerror("Error", "API Server not connected. Please run 'python run_api.py'.")
             return
 
         if self.analyzing:
@@ -886,76 +810,53 @@ class UploadScreen(ttk.Frame):
 
     def _analyze_thread(self):
         try:
-            # Load image dengan pengaturan kualitas yang lebih baik
+            # 1. Call API for analysis
+            response = self.api_client.analyze_posture(
+                self.image_path,
+                self.app.patient_data['name'],
+                self.app.patient_data['height_cm'],
+                self.confidence_threshold
+            )
+            
+            if not response.get('success'):
+                raise Exception(response.get('message', 'API analysis failed'))
+            
+            data = response.get('data', {})
+            
+            # 2. Local image processing to match GUI expectations
             img = cv2.imread(self.image_path, cv2.IMREAD_COLOR)
             if img is None:
                 raise ValueError(f"Failed to load image from {self.image_path}")
                 
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-            # Gunakan confidence threshold yang bisa disesuaikan
-            print(f"🔍 Analyzing with confidence threshold: {self.confidence_threshold}")
-            results = self.model(self.image_path, conf=self.confidence_threshold, verbose=False, device='cpu')
-
-            analyzer = AdvancedPoseAnalyzer()
-            keypoints = analyzer.extract_keypoints_from_results(results)
-
-            # Enhanced height estimation dengan akurasi yang lebih baik
-            person_height_px = analyzer.estimate_person_height_from_keypoints(keypoints)
-            if person_height_px is None or person_height_px <= 0:
-                person_height_px = img.shape[0] * 0.75  # Estimasi default yang lebih baik
-
-            actual_height_mm = self.app.patient_data['height_cm'] * 10
-            analyzer.calculate_pixel_to_mm_ratio(img.shape[0], person_height_px, actual_height_mm)
-
-            # Get detections and determine view type
-            detections = self._get_detections(results)
-            view_type = self._determine_view_type(detections)
-
+            
+            # 3. Map API response to local analysis_results format
             analysis_results = {
-                'keypoints': keypoints,
-                'conversion_ratio': analyzer.pixel_to_mm_ratio,
-                'actual_height_mm': actual_height_mm,
-                'person_height_px': person_height_px,
+                'analysis_id': data.get('analysis_id'),
+                'keypoints': data.get('keypoints'),  # API should return this if saved
+                'shoulder': data.get('shoulder'),
+                'hip': data.get('hip'),
+                'spinal': data.get('spinal'),
+                'head': data.get('head'),
+                'posture_score': data.get('posture_score'),
+                'postural_angles': data.get('postural_angles'),
+                'detections': data.get('detections'),
+                'conversion_ratio': data.get('conversion_ratio'),
+                'mm_per_pixel': data.get('conversion_ratio'), # Map to what ResultsScreen expects
+                'actual_height_mm': data.get('actual_height_mm'),
                 'image_height': img.shape[0],
                 'image_width': img.shape[1],
-                'analysis_type': 'full_analysis',
                 'image': img,
                 'image_rgb': img_rgb,
-                'yolo_results': results,
                 'image_path': self.image_path,
-                'detections': detections,
-                'view_type': view_type,
+                'analysis_type': 'full_analysis',
+                'view_type': data.get('detections', {}).get('all_detections', [{}])[0].get('classification', 'unknown'),
                 'confidence_threshold': self.confidence_threshold
             }
 
-            # Analyze based on view type
-            if view_type in ['back', 'front']:
-                shoulder_analysis = analyzer.analyze_shoulder_imbalance_advanced(keypoints)
-                hip_analysis = analyzer.analyze_hip_imbalance_advanced(keypoints)
-                spinal_analysis = analyzer.analyze_spinal_alignment_advanced(keypoints)
-                
-                analysis_results.update({
-                    'shoulder': shoulder_analysis,
-                    'hip': hip_analysis,
-                    'spinal': spinal_analysis,
-                    'head': {'status': 'Not Analyzed', 'score': 0}
-                })
-            else:  # left or right view
-                head_analysis = analyzer.analyze_head_alignment_advanced(keypoints)
-                
-                analysis_results.update({
-                    'shoulder': {'status': 'Not Analyzed', 'score': 0},
-                    'hip': {'status': 'Not Analyzed', 'score': 0},
-                    'spinal': {'status': 'Not Analyzed', 'score': 0},
-                    'head': head_analysis
-                })
-
-            postural_angles = analyzer.analyze_postural_angles(keypoints)
-            analysis_results['postural_angles'] = postural_angles
-
-            posture_score = analyzer.calculate_overall_posture_score(analysis_results)
-            analysis_results['posture_score'] = posture_score
+            # Fallback view type determination if not clear from API
+            if analysis_results['view_type'] == 'unknown':
+                 analysis_results['view_type'] = self._determine_view_type(data.get('detections'))
 
             self.parent.after(0, lambda: self._analysis_complete(analysis_results))
 
@@ -963,6 +864,7 @@ class UploadScreen(ttk.Frame):
             import traceback
             traceback.print_exc()
             self.parent.after(0, lambda: self._analysis_error(str(e)))
+
 
     def _determine_view_type(self, detections):
         """Determine view type based on detected class names"""
@@ -983,48 +885,6 @@ class UploadScreen(ttk.Frame):
         
         return 'unknown'
 
-    def _get_detections(self, results):
-        detections = {
-            'all_detections': [],
-            'classification_counts': {},
-            'total_detections': 0
-        }
-
-        try:
-            for result in results:
-                if hasattr(result, 'boxes') and result.boxes is not None:
-                    boxes = result.boxes
-                    if len(boxes.xyxy) > 0:
-                        for box, conf, cls in zip(boxes.xyxy, boxes.conf, boxes.cls):
-                            x1, y1, x2, y2 = box.cpu().numpy()
-                            confidence = float(conf.cpu().numpy())
-                            class_id = int(cls.cpu().numpy())
-
-                            class_name = self.model.names.get(class_id, f'Class_{class_id}')
-                            classification = self._classify_posture(class_name)
-                            
-                            detection_info = {
-                                'original_class': class_name,
-                                'classification': classification,
-                                'sub_category': class_name,
-                                'confidence': confidence,
-                                'bbox': {
-                                    'x1': float(x1), 
-                                    'y1': float(y1),
-                                    'x2': float(x2), 
-                                    'y2': float(y2)
-                                }
-                            }
-                            
-                            detections['all_detections'].append(detection_info)
-                            detections['classification_counts'][classification] = \
-                                detections['classification_counts'].get(classification, 0) + 1
-                            detections['total_detections'] += 1
-                            
-        except Exception as e:
-            print(f"Error getting detections: {str(e)}")
-
-        return detections
 
     def _classify_posture(self, class_name):
         posture_mapping = {

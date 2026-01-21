@@ -19,7 +19,7 @@ class PostureAnalyzerService:
         return cls._instance
 
     def __init__(self):
-        self.model_path = os.getenv("MODEL_PATH", "models/yolo_model.pt")
+        self.model_path = os.getenv("MODEL_PATH", "models/best.pt")
         if self._model is None:
             self.load_model()
 
@@ -29,6 +29,7 @@ class PostureAnalyzerService:
                 raise FileNotFoundError(f"Model not found at {self.model_path}")
 
             self._model = YOLO(self.model_path)
+                
             self._model.to('cpu')
             self._model.fp16 = False
             return True
