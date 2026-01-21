@@ -206,18 +206,32 @@ class ResultsScreen(ttk.Frame):
 
 
     def _generate_comprehensive_visualization(self, image):
-        if len(image.shape) == 3 and image.shape[2] == 3:
+        """
+        Enhanced visualization with view-specific measurements:
+        - Lateral views: Pelvic line with distance
+        - Frontal views: Shoulder-to-hip lines with distances
+        """
+        # Ensure we have RGB image
+        if len(image.shape) == 2:
+            img_vis = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        elif len(image.shape) == 3 and image.shape[2] == 3:
             img_vis = image.copy()
         else:
-            img_vis = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            print(f"⚠️ Unexpected image shape: {image.shape}")
+            img_vis = image.copy()
 
+        print(f"🖼️ Image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
+        
         keypoints_dict = self.analysis_data.get('keypoints', {})
         h, w, _ = img_vis.shape
         plumb_x = w // 2
 
+        # Draw plumb line first
         if keypoints_dict:
             img_vis, plumb_x = self._draw_plumb_line(img_vis, keypoints_dict)
+            print(f"✅ Plumb line drawn at x={plumb_x}")
 
+        # Draw detection bounding boxes
         detections = self.analysis_data.get('detections', {})
         if detections and 'all_detections' in detections:
             for det in detections['all_detections']:
@@ -225,34 +239,32 @@ class ResultsScreen(ttk.Frame):
                 if bbox:
                     x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
                     cls_name = det.get('classification', 'Person')
-                    confidence = det.get('confidence', 0) * 100  # Convert to percentage
+                    confidence = det.get('confidence', 0) * 100
                     color = (0, 255, 0)
                     if 'Kyphosis' in cls_name: color = (255, 0, 0)
                     elif 'Lordosis' in cls_name: color = (255, 255, 0)
                     elif 'Swayback' in cls_name: color = (255, 0, 255)
 
-                    # Draw bounding box
                     cv2.rectangle(img_vis, (x1, y1), (x2, y2), color, 2)
-                    
-                    # Draw label with classification and confidence percentage
                     label = f"{cls_name} {confidence:.1f}%"
                     cv2.putText(img_vis, label, (x1, y1-5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    print(f"✅ BBox drawn: {cls_name}")
 
+        # Draw skeleton
         if keypoints_dict:
             skeleton_pairs = [
-                # Upper Body
                 ('nose', 'left_eye'), ('nose', 'right_eye'),
                 ('left_eye', 'left_ear'), ('right_eye', 'right_ear'),
                 ('left_shoulder', 'right_shoulder'),
                 ('left_shoulder', 'left_elbow'), ('right_shoulder', 'right_elbow'),
                 ('left_elbow', 'left_wrist'), ('right_elbow', 'right_wrist'),
                 ('left_shoulder', 'left_hip'), ('right_shoulder', 'right_hip'),
-                # Lower Body
                 ('left_hip', 'left_knee'), ('right_hip', 'right_knee'),
                 ('left_knee', 'left_ankle'), ('right_knee', 'right_ankle')
             ]
 
+            skeleton_count = 0
             for start_k, end_k in skeleton_pairs:
                 kp1 = keypoints_dict.get(start_k)
                 kp2 = keypoints_dict.get(end_k)
@@ -260,75 +272,215 @@ class ResultsScreen(ttk.Frame):
                     pt1 = (int(kp1['x']), int(kp1['y']))
                     pt2 = (int(kp2['x']), int(kp2['y']))
                     cv2.line(img_vis, pt1, pt2, (255, 255, 255), 2, cv2.LINE_AA)
+                    skeleton_count += 1
+            
+            print(f"✅ Skeleton lines drawn: {skeleton_count}")
 
+            # Draw keypoints
+            keypoint_count = 0
             for kp_name, kp_data in keypoints_dict.items():
                 if kp_data and kp_data.get('visible'):
                     pt = (int(kp_data['x']), int(kp_data['y']))
-                    # Outer circle (White)
                     cv2.circle(img_vis, pt, 5, (255, 255, 255), -1, cv2.LINE_AA)
-                    # Inner circle (Cyan)
                     cv2.circle(img_vis, pt, 3, (255, 255, 0), -1, cv2.LINE_AA)
+                    keypoint_count += 1
+            
+            print(f"✅ Keypoints drawn: {keypoint_count}")
 
-            if self.view_type in ['front', 'back', 'anterior', 'posterior']:
-                # Draw special emphasized lines for shoulder and hip levels
-                ls = keypoints_dict.get('left_shoulder')
-                rs = keypoints_dict.get('right_shoulder')
-                if ls and rs and ls.get('visible') and rs.get('visible'):
-                    cv2.line(img_vis, (int(ls['x']), int(ls['y'])),
-                            (int(rs['x']), int(rs['y'])), (0, 255, 255), 2, cv2.LINE_AA)
-
-                # Pelvic analysis (distance and shift)
-                img_vis = self._draw_pelvic_side_shift(img_vis, keypoints_dict, plumb_x)
+            # ============================================================
+            # PELVIC LINE - WITH COMPREHENSIVE KEYPOINT DEBUGGING
+            # ============================================================
+            
+            # First, let's see ALL keypoints that are available
+            print(f"🔍 ALL Keypoints in dictionary:")
+            for kp_name, kp_value in keypoints_dict.items():
+                if kp_value:
+                    print(f"   - {kp_name}: x={kp_value.get('x', 'N/A')}, y={kp_value.get('y', 'N/A')}, visible={kp_value.get('visible', 'N/A')}")
+                else:
+                    print(f"   - {kp_name}: None")
+            
+            # Try multiple keypoint name variations
+            l_hip = (keypoints_dict.get('left_hip') or 
+                    keypoints_dict.get('left hip') or 
+                    keypoints_dict.get('LEFT_HIP') or
+                    keypoints_dict.get('l_hip') or
+                    keypoints_dict.get('hip_left'))
+            
+            r_hip = (keypoints_dict.get('right_hip') or 
+                    keypoints_dict.get('right hip') or
+                    keypoints_dict.get('RIGHT_HIP') or
+                    keypoints_dict.get('r_hip') or
+                    keypoints_dict.get('hip_right'))
+            
+            print(f"🔍 Left hip raw data: {l_hip}")
+            print(f"🔍 Right hip raw data: {r_hip}")
+            print(f"🔍 View type: {self.view_type}")
+            
+            # Flexible validation
+            l_hip_valid = l_hip and isinstance(l_hip, dict) and 'x' in l_hip and 'y' in l_hip and l_hip.get('x', 0) > 0 and l_hip.get('y', 0) > 0
+            r_hip_valid = r_hip and isinstance(r_hip, dict) and 'x' in r_hip and 'y' in r_hip and r_hip.get('x', 0) > 0 and r_hip.get('y', 0) > 0
+            
+            print(f"🔍 Left hip valid: {l_hip_valid}")
+            print(f"🔍 Right hip valid: {r_hip_valid}")
+            
+            if l_hip_valid and r_hip_valid:
+                pt1 = (int(l_hip['x']), int(l_hip['y']))
+                pt2 = (int(r_hip['x']), int(r_hip['y']))
+                
+                print(f"✅ Drawing pelvic line from {pt1} to {pt2}")
+                
+                # Calculate distance
+                dist_px = np.sqrt((pt2[0] - pt1[0])**2 + (pt2[1] - pt1[1])**2)
+                mm_per_px = self.analysis_data.get('mm_per_pixel', 0.253852)
+                dist_mm = dist_px * mm_per_px
+                
+                # Draw THICK MAGENTA pelvic line
+                cv2.line(img_vis, pt1, pt2, (255, 0, 255), 5, cv2.LINE_AA)
+                
+                # Midpoint for label
+                mid_x = int((pt1[0] + pt2[0]) / 2)
+                mid_y = int((pt1[1] + pt2[1]) / 2)
+                
+                # Label with background
+                label_text = f"PELVIC: {dist_mm:.1f}mm"
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                font_scale = 0.8
+                thickness = 2
+                
+                # Get text size
+                (text_w, text_h), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
+                
+                # Draw black background
+                padding = 10
+                cv2.rectangle(img_vis, 
+                            (mid_x - text_w//2 - padding, mid_y - text_h - padding - 5),
+                            (mid_x + text_w//2 + padding, mid_y + padding),
+                            (0, 0, 0), -1)
+                
+                # Draw white border
+                cv2.rectangle(img_vis, 
+                            (mid_x - text_w//2 - padding, mid_y - text_h - padding - 5),
+                            (mid_x + text_w//2 + padding, mid_y + padding),
+                            (255, 255, 255), 2)
+                
+                # Draw text
+                cv2.putText(img_vis, label_text, 
+                        (mid_x - text_w//2, mid_y - 5),
+                        font, font_scale, (255, 0, 255), thickness, cv2.LINE_AA)
+                
+                # Draw LARGE endpoint circles
+                cv2.circle(img_vis, pt1, 12, (255, 0, 255), -1, cv2.LINE_AA)
+                cv2.circle(img_vis, pt2, 12, (255, 0, 255), -1, cv2.LINE_AA)
+                cv2.circle(img_vis, pt1, 8, (255, 255, 255), -1, cv2.LINE_AA)
+                cv2.circle(img_vis, pt2, 8, (255, 255, 255), -1, cv2.LINE_AA)
+                
+                print(f"✅ ✅ ✅ PELVIC LINE SUCCESSFULLY DRAWN: {dist_mm:.1f}mm")
+            else:
+                print(f"❌ Cannot draw pelvic line - Debugging info:")
+                print(f"   - Left hip exists: {l_hip is not None}")
+                print(f"   - Right hip exists: {r_hip is not None}")
+                if l_hip:
+                    print(f"   - Left hip type: {type(l_hip)}")
+                    print(f"   - Left hip content: {l_hip}")
+                if r_hip:
+                    print(f"   - Right hip type: {type(r_hip)}")
+                    print(f"   - Right hip content: {r_hip}")
+            
+            # ============================================================
+            # SHOULDER-HIP LINES (For Frontal/Anterior/Posterior views)
+            # ============================================================
+            
+            if self.view_type.lower() in ['front', 'back', 'anterior', 'posterior']:
+                print("🔍 Processing FRONTAL view measurements...")
+                
+                # Try multiple variations for shoulders too
+                l_shoulder = (keypoints_dict.get('left_shoulder') or 
+                            keypoints_dict.get('left shoulder') or
+                            keypoints_dict.get('LEFT_SHOULDER') or
+                            keypoints_dict.get('l_shoulder'))
+                
+                r_shoulder = (keypoints_dict.get('right_shoulder') or 
+                            keypoints_dict.get('right shoulder') or
+                            keypoints_dict.get('RIGHT_SHOULDER') or
+                            keypoints_dict.get('r_shoulder'))
+                
+                # Flexible validation
+                l_shoulder_valid = l_shoulder and isinstance(l_shoulder, dict) and 'x' in l_shoulder and 'y' in l_shoulder and l_shoulder.get('x', 0) > 0
+                r_shoulder_valid = r_shoulder and isinstance(r_shoulder, dict) and 'x' in r_shoulder and 'y' in r_shoulder and r_shoulder.get('x', 0) > 0
+                
+                # LEFT shoulder-hip
+                if l_shoulder_valid and l_hip_valid:
+                    pt_s = (int(l_shoulder['x']), int(l_shoulder['y']))
+                    pt_h = (int(l_hip['x']), int(l_hip['y']))
+                    
+                    dist_px = np.sqrt((pt_h[0] - pt_s[0])**2 + (pt_h[1] - pt_s[1])**2)
+                    dist_mm = dist_px * mm_per_px
+                    
+                    # Draw CYAN line
+                    cv2.line(img_vis, pt_s, pt_h, (255, 255, 0), 5, cv2.LINE_AA)
+                    
+                    # Label
+                    mid_x = int((pt_s[0] + pt_h[0]) / 2)
+                    mid_y = int((pt_s[1] + pt_h[1]) / 2)
+                    label = f"L: {dist_mm:.1f}mm"
+                    
+                    (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                    cv2.rectangle(img_vis, (mid_x-lw-15, mid_y-lh-10), (mid_x-5, mid_y+5), (0,0,0), -1)
+                    cv2.rectangle(img_vis, (mid_x-lw-15, mid_y-lh-10), (mid_x-5, mid_y+5), (255,255,0), 2)
+                    cv2.putText(img_vis, label, (mid_x-lw-10, mid_y-5), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,0), 2, cv2.LINE_AA)
+                    
+                    print(f"✅ LEFT SHOULDER-HIP DRAWN: {dist_mm:.1f}mm")
+                else:
+                    print(f"❌ Cannot draw LEFT shoulder-hip: shoulder_valid={l_shoulder_valid}, hip_valid={l_hip_valid}")
+                
+                # RIGHT shoulder-hip
+                if r_shoulder_valid and r_hip_valid:
+                    pt_s = (int(r_shoulder['x']), int(r_shoulder['y']))
+                    pt_h = (int(r_hip['x']), int(r_hip['y']))
+                    
+                    dist_px = np.sqrt((pt_h[0] - pt_s[0])**2 + (pt_h[1] - pt_s[1])**2)
+                    dist_mm = dist_px * mm_per_px
+                    
+                    # Draw YELLOW line
+                    cv2.line(img_vis, pt_s, pt_h, (0, 255, 255), 5, cv2.LINE_AA)
+                    
+                    # Label
+                    mid_x = int((pt_s[0] + pt_h[0]) / 2)
+                    mid_y = int((pt_s[1] + pt_h[1]) / 2)
+                    label = f"R: {dist_mm:.1f}mm"
+                    
+                    (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                    cv2.rectangle(img_vis, (mid_x+5, mid_y-lh-10), (mid_x+lw+15, mid_y+5), (0,0,0), -1)
+                    cv2.rectangle(img_vis, (mid_x+5, mid_y-lh-10), (mid_x+lw+15, mid_y+5), (0,255,255), 2)
+                    cv2.putText(img_vis, label, (mid_x+10, mid_y-5), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2, cv2.LINE_AA)
+                    
+                    print(f"✅ RIGHT SHOULDER-HIP DRAWN: {dist_mm:.1f}mm")
+                else:
+                    print(f"❌ Cannot draw RIGHT shoulder-hip: shoulder_valid={r_shoulder_valid}, hip_valid={r_hip_valid}")
+                
+                # Draw pelvic side shift (existing function) - with safety check
+                if hasattr(self, '_draw_pelvic_side_shift'):
+                    try:
+                        img_vis = self._draw_pelvic_side_shift(img_vis, keypoints_dict, plumb_x)
+                        print("✅ Pelvic side shift drawn")
+                    except Exception as e:
+                        print(f"⚠️ Could not draw pelvic side shift: {e}")
+                
+                # Draw shoulder level line
+                if l_shoulder_valid and r_shoulder_valid:
+                    cv2.line(img_vis, (int(l_shoulder['x']), int(l_shoulder['y'])),
+                            (int(r_shoulder['x']), int(r_shoulder['y'])), (0, 255, 255), 2, cv2.LINE_AA)
+                    print("✅ Shoulder level line drawn")
+                else:
+                    print("❌ Cannot draw shoulder level line")
+        
+        print(f"🎨 Final image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
+        print("=" * 60)
         
         return img_vis
 
-    def _draw_pelvic_side_shift(self, img, keypoints_dict, plumb_x):
-        """
-        Draws the pelvic line between hips and calculates the width/distance.
-        Also visualizes the side shift relative to the plumb line.
-        """
-        l_hip = keypoints_dict.get('left_hip')
-        r_hip = keypoints_dict.get('right_hip')
-
-        if l_hip and r_hip and l_hip.get('visible') and r_hip.get('visible'):
-            pt1 = (int(l_hip['x']), int(l_hip['y']))
-            pt2 = (int(r_hip['x']), int(r_hip['y']))
-
-            # 1. Draw Pelvic Line (Magenta/Pink for visibility)
-            cv2.line(img, pt1, pt2, (255, 0, 255), 3, cv2.LINE_AA)
-
-            # 2. Calculate Distance (Pelvic Width)
-            dist_px = np.sqrt((pt2[0] - pt1[0])**2 + (pt2[1] - pt1[1])**2)
-            mm_per_px = self.analysis_data.get('mm_per_pixel', 0.0)
-            dist_mm = dist_px * mm_per_px
-            
-            # Midpoint for text placement
-            mid_x = int((pt1[0] + pt2[0]) / 2)
-            mid_y = int((pt1[1] + pt2[1]) / 2)
-
-            # Display Distance Text
-            label_dist = f"{dist_mm:.1f} mm" if mm_per_px > 0 else f"{dist_px:.0f} px"
-            cv2.putText(img, label_dist, (mid_x - 40, mid_y - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2, cv2.LINE_AA)
-
-            # 3. Side Shift Visualization (Center of pelvis vs Plumb Line)
-            # Draw a small circle at the pelvic midpoint
-            cv2.circle(img, (mid_x, mid_y), 6, (0, 0, 255), -1, cv2.LINE_AA)
-            
-            # Draw line from pelvic midpoint to plumb line horizontally
-            # Plumb line X is passed as 'plumb_x'
-            cv2.line(img, (mid_x, mid_y), (plumb_x, mid_y), (0, 0, 255), 2, cv2.LINE_AA)
-            
-            shift_px = abs(mid_x - plumb_x)
-            shift_mm = shift_px * mm_per_px
-            label_shift = f"Shift: {shift_mm:.1f} mm" if mm_per_px > 0 else f"Shift: {shift_px:.0f} px"
-            
-            # Display shift text near the line
-            text_x = mid_x + 10 if mid_x < plumb_x else mid_x - 120
-            cv2.putText(img, label_shift, (text_x, mid_y + 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1, cv2.LINE_AA)
-
-        return img
 
     def _display_comparison(self, img_before, img_after):
         for widget in self.content_frame.winfo_children():
