@@ -5,7 +5,7 @@
   
   [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
   [![Framework](https://img.shields.io/badge/Framework-FastAPI%20%26%20Tkinter-orange.svg)](https://fastapi.tiangolo.com/)
-  [![AI](https://img.shields.io/badge/AI-YOLOv8-green.svg)](https://ultralytics.com/)
+  [![AI](https://img.shields.io/badge/AI-YOLOv11-green.svg)](https://ultralytics.com/)
   [![Database](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](https://www.sqlite.org/)
 </div>
 
@@ -18,20 +18,24 @@ The **KURO Performance AI Postural Assessment System** is a professional-grade c
 ## ✨ Key Features
 
 ### 🔹 Advanced Clinical Analysis
-- **Dual View Support**: Automatically detects and processes **Frontal** (Anterior/Posterior) and **Lateral** (Side) views.
+- **Dual View Support**: Automatically detects and processes **Frontal** (Anterior/Posterior) and **Lateral** (Left/Right Side) views.
 - **Biomechanical Metrics**:
-  *   **Pelvic Inclination**: Precise sway and tilt measurements.
+  *   **Pelvic Alignment**: Medical-grade 30° anterior tilt visualization with precise width measurements.
   *   **Shoulder Balance**: Automatic height difference detection (mm).
-  *   **Spinal Alignment**: Lateral deviation and plumb line shift.
-  *   **Head Alignment**: Forward head posture and tilt assessment.
-- **Medically Valid Visualizations**: High-contrast overlays for professional clinician reports.
+  *   **Spinal Alignment**: Vertical plumb line alignment for lateral views.
+  *   **Head Alignment**: Forward head posture and shift assessment.
+- **Medically Valid Visualizations**: 
+  *   High-contrast overlays for professional clinician reports.
+  *   Lateral views feature B-E-F vertical alignment and slanted C-D pelvic line.
+  *   All keypoints clipped to person's bounding box for anatomical accuracy.
 
 ### 🔹 Technical Capabilities
-- **Real-time YOLO Inference**: Fast processing using a specialized 8-keypoint model.
+- **Real-time YOLO Inference**: Fast processing using a specialized 8-keypoint model (YOLOv11).
 - **Local-First Architecture**: Powered by **SQLite**, ensuring data privacy and offline capability.
 - **Dual Interface**:
-  *   **Desktop App**: A rich Tkinter GUI for clinicians.
+  *   **Desktop App**: A rich Tkinter GUI for clinicians with comprehensive dashboards.
   *   **REST API**: A robust FastAPI backend for integration with web portals.
+- **Streamlined Reporting**: Clean data tables with essential metrics (Component, Parameter, Value, Unit, Status).
 
 ---
 
@@ -70,8 +74,14 @@ The system uses a refined **Kuro 8-Point Keypoint Model** to ensure anatomical a
 | **0 - 3** | Shoulder, Hip, Knee, Ankle | **Right** |
 | **4 - 7** | Shoulder, Hip, Knee, Ankle | **Left** |
 
+### Lateral View Medical Alignment
+For lateral (side) views, the system enforces medical postural theory:
+- **Point E (Pelvic Center)**: Vertically aligned with Shoulder (B) and Knee (F) to form a postural plumb line.
+- **C-D Line (Pelvic)**: Consistently slanted at **30 degrees** (anterior tilt) with Front (D) lower than Back (C).
+- **Line Length**: 450 pixels for clear professional visualization.
+
 > [!NOTE]
-> The skeleton visualization logic automatically detects view types to provide relevant measurements (e.g., Hip-to-Hip for Frontal, Hip-to-Ankle for Lateral).
+> The skeleton visualization logic automatically detects view types to provide relevant measurements (e.g., Hip-to-Hip for Frontal, specialized alignment for Lateral).
 
 ---
 
@@ -83,9 +93,10 @@ The system uses a refined **Kuro 8-Point Keypoint Model** to ensure anatomical a
 │   ├── api/             # FastAPI implementation & routes
 │   ├── core/            # Biomechanical calculation engine
 │   ├── gui/             # Tkinter screens and UI components
-│   ├── models/          # YOLOv8 .pt models
+│   ├── models/          # YOLOv11 .pt models
 │   ├── assets/          # Branding and static resources
 │   ├── results/         # Processed images and CSV reports
+│   ├── scripts/         # Debugging and utility scripts
 │   └── run_*.py         # Entry point scripts
 ├── README.md            # Root documentation
 └── .env.example         # Template for environment settings
@@ -95,10 +106,10 @@ The system uses a refined **Kuro 8-Point Keypoint Model** to ensure anatomical a
 
 ## ⚒️ Technical Stack
 
-- **Computer Vision**: Ultralytics YOLOv8
+- **Computer Vision**: Ultralytics YOLOv11
 - **Backend**: FastAPI (Python)
 - **Frontend**: Tkinter (Native Python GUI)
-- **Data Science**: Numpy, Scipy, Matplotlib
+- **Data Science**: NumPy, SciPy, Matplotlib, OpenCV
 - **Database**: SQLite3
 
 ---
