@@ -71,6 +71,7 @@ class PostureAnalyzerService:
         hip_analysis = analyzer.analyze_hip_imbalance_advanced(keypoints)
         spinal_analysis = analyzer.analyze_spinal_alignment_advanced(keypoints)
         head_analysis = analyzer.analyze_head_alignment_advanced(keypoints)
+        lateral_distances = analyzer.analyze_lateral_distances(keypoints)
 
         analysis_results = {
             'keypoints': keypoints,
@@ -81,17 +82,27 @@ class PostureAnalyzerService:
             'shoulder': shoulder_analysis,
             'hip': hip_analysis,
             'spinal': spinal_analysis,
-            'head': head_analysis
+            'head': head_analysis,
+            'lateral_distances': lateral_distances
         }
 
         postural_angles = analyzer.analyze_postural_angles(keypoints)
         analysis_results['postural_angles'] = postural_angles
+        analysis_results['posture_center_x'] = analyzer.calculate_posture_center_x(keypoints, img.shape[1])
 
         posture_score = analyzer.calculate_overall_posture_score(analysis_results)
         analysis_results['posture_score'] = posture_score
 
         detections = self._get_detections(results)
         analysis_results['detections'] = detections
+        
+        # Determine view_type for GUI
+        view_type = 'frontal'
+        if detections['all_detections']:
+            cls = detections['all_detections'][0]['classification'].lower()
+            if any(k in cls for k in ['kiri', 'kanan', 'left', 'right', 'lateral', 'samping']):
+                view_type = 'lateral'
+        analysis_results['view_type'] = view_type
 
         return analysis_results
 

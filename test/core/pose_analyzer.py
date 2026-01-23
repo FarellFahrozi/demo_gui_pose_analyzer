@@ -9,16 +9,26 @@ class AdvancedPoseAnalyzer:
         self.pixel_to_mm_ratio = None
         self.debug_mode = True
         # Scaling factors for realistic measurements
-        self.HEIGHT_DIFF_SCALE = 0.15  # Scale for shoulder/hip height differences
+        self.HEIGHT_DIFF_SCALE = 1.5  # Scale for shoulder/hip height differences (Adjusted 10x per user request)
         self.LATERAL_DEVIATION_SCALE = 0.12  # Scale for spinal lateral deviation
         self.HEAD_SHIFT_SCALE = 0.18  # Scale for head shift measurements
-        # Updated 8-point mapping for Kuro model:
-        # Sides are grouped: Right (0-3), Left (4-7)
-        # Order per side: Shoulder, Hip, Knee, Ankle
-        self.keypoint_mapping = {
+        # Updated mappings for Kuro model:
+        self.ANTERIOR_MAPPING = {
             'right_shoulder': 0, 'right_hip': 1, 'right_knee': 2, 'right_ankle': 3,
             'left_shoulder': 4, 'left_hip': 5, 'left_knee': 6, 'left_ankle': 7
         }
+        
+        # Lateral mappings: Model indices differ based on orientation
+        self.LATERAL_LEFT_MAPPING = {
+            'ear': 0, 'shoulder': 1, 'pelvic_back': 9, 'pelvic_front': 2,
+            'pelvic_center': 2, 'knee': 3, 'ankle': 4
+        }
+        self.LATERAL_RIGHT_MAPPING = {
+            'ear': 0, 'shoulder': 1, 'pelvic_back': 6, 'pelvic_front': 2,
+            'pelvic_center': 2, 'knee': 3, 'ankle': 4
+        }
+        self.LATERAL_MAPPING = self.LATERAL_LEFT_MAPPING # Default
+        self.keypoint_mapping = self.ANTERIOR_MAPPING
 
     def _debug_print(self, message):
         if self.debug_mode:
@@ -59,8 +69,118 @@ class AdvancedPoseAnalyzer:
                         else:
                             keypoints_dict[name] = None
         self._add_midpoints(keypoints_dict)
+        # Also extract lateral points if they exist (indices 0-6 overlap)
+        self._add_lateral_points(results, keypoints_dict)
         self._debug_print(f"Extracted {len(keypoints_dict)} keypoints")
         return keypoints_dict
+
+    def _add_lateral_points(self, results, keypoints_dict):
+        """Extract lateral-specific points based on side orientation (Left/Right) with BBox clipping"""
+        # Determine mapping based on classification (Kiri/Kanan)
+        mapping = self.LATERAL_LEFT_MAPPING # Default
+        person_bbox = None
+        is_right_lateral = False
+        
+        for result in results:
+            if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
+                # Use the first box since we use xy[0] for keypoints
+                person_bbox = result.boxes.xyxy[0].cpu().numpy()
+                
+                # Determine orientation from any lateral classification present
+                for cls_idx in result.boxes.cls:
+                    class_id = int(cls_idx.item())
+                    class_name = result.names.get(class_id, "").lower()
+                    if any(k in class_name for k in ["kanan", "right"]):
+                        mapping = self.LATERAL_RIGHT_MAPPING
+                        is_right_lateral = True
+                        self._debug_print("Detected Right Lateral side - using Right mapping")
+                        break
+                    elif any(k in class_name for k in ["kiri", "left"]):
+                        mapping = self.LATERAL_LEFT_MAPPING
+                        self._debug_print("Detected Left Lateral side - using Left mapping")
+                        break
+        
+        for result in results:
+            if hasattr(result, 'keypoints') and result.keypoints is not None:
+                keypoints = result.keypoints
+                if len(keypoints.xy) > 0:
+                    kp = keypoints.xy[0].cpu().numpy()
+                    conf = keypoints.conf[0].cpu().numpy() if keypoints.conf is not None else None
+                    for name, idx in mapping.items():
+                        if idx < len(kp):
+                            x, y = kp[idx]
+                            
+                            # CLIP TO BBOX (If available)
+                            # This prevents points from flying far away from the body
+                            if person_bbox is not None:
+                                x = np.clip(x, person_bbox[0], person_bbox[2])
+                                y = np.clip(y, person_bbox[1], person_bbox[3])
+                            
+                            confidence = conf[idx] if conf is not None and idx < len(conf) else 0.0
+                            visible = True # Force visibility for user-calibrated points
+                            keypoints_dict[f'lateral_{name}'] = {
+                                'x': float(x), 'y': float(y),
+                                'confidence': float(confidence), 'visible': visible
+                            }
+        
+        # Apply Medical Alignment (Phase 13/14) if all critical points exist
+        pb = keypoints_dict.get('lateral_pelvic_back')
+        pf = keypoints_dict.get('lateral_pelvic_front')
+        sh = keypoints_dict.get('lateral_shoulder')
+        kn = keypoints_dict.get('lateral_knee')
+        
+        if sh and kn and pb and pf:
+            # 1. Align E vertically with B (Shoulder) and F (Knee) to form a plumb line
+            e_x = (sh['x'] + kn['x']) / 2
+            e_y = (pb['y'] + pf['y']) / 2 # Initial vertical center
+            
+            # 2. Enforce 30-degree slant (Miring) for C-D line
+            # Increase width for better visibility as requested (Phase 16)
+            width = 450 # Substantial width for professional look
+            
+            angle_rad = np.radians(30) # 30 degrees miring
+            dy = (width / 2) * np.tan(angle_rad)
+            
+            # Determine direction based on orientation
+            # Right view (facing Right): Front (D) is to the Right (+X), Back (C) is to the Left (-X)
+            # Left view (facing Left): Front (D) is to the Left (-X), Back (C) is to the Right (+X)
+            if is_right_lateral:
+                pb['x'] = e_x - (width / 2)
+                pf['x'] = e_x + (width / 2)
+            else: # Left Lateral (Default)
+                pb['x'] = e_x + (width / 2)
+                pf['x'] = e_x - (width / 2)
+            
+            # C (Back) is always higher, D (Front) is always lower for Anterior Tilt look
+            pb['y'] = e_y - dy
+            pf['y'] = e_y + dy
+            
+            # Update E in dict
+            keypoints_dict['lateral_pelvic_center'] = {
+                'x': float(e_x), 'y': float(e_y),
+                'confidence': min(pb['confidence'], pf['confidence']),
+                'visible': True
+            }
+            
+            # Re-clip all adjusted points to BBox
+            if person_bbox is not None:
+                for pt in [pb, pf, keypoints_dict['lateral_pelvic_center']]:
+                    pt['x'] = float(np.clip(pt['x'], person_bbox[0], person_bbox[2]))
+                    pt['y'] = float(np.clip(pt['y'], person_bbox[1], person_bbox[3]))
+            
+            self._debug_print(f"Universal Medical Alignment applied (Right={is_right_lateral})")
+            return
+            
+        # Default Midpoint Calculation (Fallback if points missing)
+        if pb and pf:
+            if pb['visible'] and pf['visible']:
+                keypoints_dict['lateral_pelvic_center'] = {
+                    'x': (pb['x'] + pf['x']) / 2,
+                    'y': (pb['y'] + pf['y']) / 2,
+                    'confidence': min(pb['confidence'], pf['confidence']),
+                    'visible': True
+                }
+                self._debug_print(f"Calculated Pelvic Center (E): {keypoints_dict['lateral_pelvic_center']}")
 
     def _add_midpoints(self, keypoints_dict):
         if keypoints_dict.get('left_shoulder') and keypoints_dict.get('right_shoulder'):
@@ -89,14 +209,22 @@ class AdvancedPoseAnalyzer:
 
     def estimate_person_height_from_keypoints(self, keypoints_dict):
         head_points = []
+        # Frontal names
         for kp_name in ['nose', 'left_ear', 'right_ear']:
-            if kp_name in keypoints_dict and keypoints_dict[kp_name] and keypoints_dict[kp_name]['visible']:
+            if kp_name in keypoints_dict and keypoints_dict[kp_name] and keypoints_dict[kp_name].get('visible'):
                 head_points.append(keypoints_dict[kp_name]['y'])
+        # Lateral names
+        if 'lateral_ear' in keypoints_dict and keypoints_dict['lateral_ear'] and keypoints_dict['lateral_ear'].get('visible'):
+            head_points.append(keypoints_dict['lateral_ear']['y'])
 
         ankle_points = []
+        # Frontal names
         for kp_name in ['left_ankle', 'right_ankle']:
-            if kp_name in keypoints_dict and keypoints_dict[kp_name] and keypoints_dict[kp_name]['visible']:
+            if kp_name in keypoints_dict and keypoints_dict[kp_name] and keypoints_dict[kp_name].get('visible'):
                 ankle_points.append(keypoints_dict[kp_name]['y'])
+        # Lateral names
+        if 'lateral_ankle' in keypoints_dict and keypoints_dict['lateral_ankle'] and keypoints_dict['lateral_ankle'].get('visible'):
+            ankle_points.append(keypoints_dict['lateral_ankle']['y'])
 
         if head_points and ankle_points:
             min_head_y = min(head_points)
@@ -105,21 +233,44 @@ class AdvancedPoseAnalyzer:
             self._debug_print(f"Person height in pixels (head-ankle): {height_px:.1f}")
             return height_px if height_px > 100 else None
         
-        # Fallback to shoulder-ankle height if head is missing
+        # Fallback to shoulder-ankle height
         shoulder_points = []
-        for kp_name in ['left_shoulder', 'right_shoulder']:
-            if kp_name in keypoints_dict and keypoints_dict[kp_name] and keypoints_dict[kp_name]['visible']:
+        for kp_name in ['left_shoulder', 'right_shoulder', 'lateral_shoulder']:
+            if kp_name in keypoints_dict and keypoints_dict[kp_name] and keypoints_dict[kp_name].get('visible'):
                 shoulder_points.append(keypoints_dict[kp_name]['y'])
         
         if shoulder_points and ankle_points:
             min_sh_y = min(shoulder_points)
             max_ankle_y = max(ankle_points)
-            # Add ~20% for head height if using shoulder
+            # Add ~25% for head height if using shoulder
             height_px = (max_ankle_y - min_sh_y) * 1.25 
             self._debug_print(f"Person height in pixels (shoulder-ankle scaled): {height_px:.1f}")
             return height_px if height_px > 100 else None
             
         return None
+
+    def calculate_posture_center_x(self, keypoints_dict, img_w):
+        """Calculate the average X coordinate of the core body posture for centering the plumbline."""
+        # Use a broader set of points for centering to be more robust
+        anchor_points = [
+            'lateral_shoulder', 'lateral_pelvic_center', 'lateral_knee', 'lateral_ankle',
+            'left_shoulder', 'right_shoulder', 'left_hip', 'right_hip'
+        ]
+        x_coords = []
+        for name in anchor_points:
+            kp = keypoints_dict.get(name)
+            if kp and kp.get('visible'):
+                x_coords.append(kp['x'])
+        
+        # If no anchor points, use all visible points
+        if not x_coords:
+            for kp in keypoints_dict.values():
+                if isinstance(kp, dict) and kp.get('visible') and 'x' in kp:
+                    x_coords.append(kp['x'])
+        
+        if x_coords:
+            return sum(x_coords) / len(x_coords)
+        return img_w // 2
 
     def calculate_angle(self, point_a, point_b, point_c):
         if not all([point_a, point_b, point_c]):
@@ -173,6 +324,7 @@ class AdvancedPoseAnalyzer:
 
             # Cap at maximum realistic value (50mm)
             results['height_difference_mm'] = round(min(height_mm, 50), 2)
+            results['shoulder_height_diff_mm'] = results['height_difference_mm']
 
             slope_angle = self.calculate_slope_angle(left_shoulder, right_shoulder)
             results['slope_angle_deg'] = round(min(slope_angle, 30), 2)
@@ -202,6 +354,12 @@ class AdvancedPoseAnalyzer:
 
             results['asymmetry_score'] = round((height_score * 0.6 + angle_score * 0.4), 2)
             results['score'] = results['asymmetry_score']
+
+            # Calculate Shoulder Width (A to B)
+            results['width_mm'] = 0
+            if self.pixel_to_mm_ratio:
+                dist_px = self._distance(left_shoulder, right_shoulder)
+                results['width_mm'] = round(dist_px * self.pixel_to_mm_ratio, 2)
 
             if results['height_difference_mm'] < 5 and abs(results['slope_angle_deg']) < 2:
                 results['status'] = 'Very Balanced'
@@ -239,6 +397,7 @@ class AdvancedPoseAnalyzer:
 
             # Cap at maximum realistic value (50mm)
             results['height_difference_mm'] = round(min(height_mm, 50), 2)
+            results['hip_height_diff_mm'] = results['height_difference_mm']
 
             pelvic_tilt = self.calculate_slope_angle(left_hip, right_hip)
             results['pelvic_tilt_angle'] = round(min(pelvic_tilt, 30), 2)
@@ -268,6 +427,12 @@ class AdvancedPoseAnalyzer:
 
             results['asymmetry_score'] = round((height_score * 0.7 + angle_score * 0.3), 2)
             results['score'] = results['asymmetry_score']
+
+            # Calculate Hip Width (C to D)
+            results['width_mm'] = 0
+            if self.pixel_to_mm_ratio:
+                dist_px = self._distance(left_hip, right_hip)
+                results['width_mm'] = round(dist_px * self.pixel_to_mm_ratio, 2)
 
             if results['height_difference_mm'] < 5 and abs(results['pelvic_tilt_angle']) < 2:
                 results['status'] = 'Very Balanced'
@@ -565,6 +730,52 @@ class AdvancedPoseAnalyzer:
             'score': score,
             'debug_info': debug_info
         }
+
+    def analyze_lateral_distances(self, keypoints):
+        """Calculate distances for side view: Ear-Shoulder, Shoulder-Pelvic, PelvicBack-PelvicFront"""
+        results = {
+            'head_shift_mm': 0,
+            'spine_shift_mm': 0,
+            'pelvic_shift_mm': 0,
+            'ear_to_shoulder_mm': 0,  # Legacy
+            'shoulder_to_pelvic_mm': 0, # Legacy
+            'pelvic_width_mm': 0       # Legacy
+        }
+        
+        # Ensure we have a valid ratio
+        ratio = self.pixel_to_mm_ratio if self.pixel_to_mm_ratio and self.pixel_to_mm_ratio > 0 else 0.5
+            
+        def get_pt(name):
+            # Prefer lateral_ prefix, fallback to standard keys
+            kp = keypoints.get(f'lateral_{name}') or keypoints.get(name)
+            # For lateral view, we often force visibility or use lower thresholds
+            return kp if kp and (kp.get('visible') or 'lateral_' in str(kp.keys())) else None
+
+        ear = get_pt('ear')
+        sh = get_pt('shoulder')
+        p_back = get_pt('pelvic_back')
+        p_front = get_pt('pelvic_front')
+        p_center = get_pt('pelvic_center')
+        
+        # A to B (Head Shift)
+        if ear and sh:
+            dist_px = self._distance(ear, sh)
+            results['head_shift_mm'] = round(dist_px * ratio, 2)
+            results['ear_to_shoulder_mm'] = results['head_shift_mm']
+        
+        # B to E (Spine Shift)
+        if sh and p_center:
+            dist_px = self._distance(sh, p_center)
+            results['spine_shift_mm'] = round(dist_px * ratio, 2)
+            results['shoulder_to_pelvic_mm'] = results['spine_shift_mm']
+            
+        # C to D (Pelvic Shift)
+        if p_back and p_front:
+            dist_px = self._distance(p_back, p_front)
+            results['pelvic_shift_mm'] = round(dist_px * ratio, 2)
+            results['pelvic_width_mm'] = results['pelvic_shift_mm']
+            
+        return results
 
     def analyze_postural_angles(self, keypoints):
         angles = {}

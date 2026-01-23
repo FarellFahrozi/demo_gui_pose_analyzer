@@ -205,9 +205,8 @@ class ResultsScreen(ttk.Frame):
             elif valid_r:
                 anchor_x = int(r_ankle['x'])
         else:
-            ankle = keypoints_dict.get('left_ankle') or keypoints_dict.get('right_ankle')
-            if ankle and ankle['visible'] and is_in_bbox((ankle['x'], ankle['y']), bbox):
-                anchor_x = int(ankle['x'])
+            # Lateral: Posture center
+            anchor_x = int(self.analysis_data.get('posture_center_x', w // 2))
 
         dash_length = 20
         gap_length = 10
@@ -255,10 +254,10 @@ class ResultsScreen(ttk.Frame):
                 if bbox and person_bbox is None:
                     person_bbox = (int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2']))
 
-        # Draw plumb line first
-        if keypoints_dict:
-            img_vis, plumb_x = self._draw_plumb_line(img_vis, keypoints_dict, person_bbox)
-            print(f"✅ Plumb line drawn at x={plumb_x}")
+        # Draw plumb line first (Removed per user request)
+        # if keypoints_dict:
+        #     img_vis, plumb_x = self._draw_plumb_line(img_vis, keypoints_dict, person_bbox)
+        #     print(f"✅ Plumb line drawn at x={plumb_x}")
 
         # Draw detection bounding boxes
         if detections and 'all_detections' in detections:
@@ -286,185 +285,224 @@ class ResultsScreen(ttk.Frame):
             bx1, by1, bx2, by2 = bbox
             return bx1 <= px <= bx2 and by1 <= py <= by2
 
-        # Draw skeleton
-        if keypoints_dict:
+        # ============================================================
+        # SKELETON & MEASUREMENTS (VIEW-SPECIFIC)
+        # ============================================================
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+
+        if keypoints_dict and self._is_lateral():
+            # LATERAL (SIDE): Multicolor skeleton with fail-safe distance calculation
+            lat_dists = self.analysis_data.get('lateral_distances', {})
+            
+            def get_lat_pt(name):
+                k = keypoints_dict.get(f'lateral_{name}')
+                return (int(k['x']), int(k['y'])) if k and k.get('visible') else None
+
+            pt_a = get_lat_pt('ear')
+            pt_b = get_lat_pt('shoulder')
+            pt_c = get_lat_pt('pelvic_back')
+            pt_d = get_lat_pt('pelvic_front')
+            pt_e = get_lat_pt('pelvic_center')
+            pt_f = get_lat_pt('knee')
+            pt_g = get_lat_pt('ankle')
+
+            # FAIL-SAFE DISTANCE CALCULATION (If API returns 0 or missing)
+            m_ear_sh = lat_dists.get('ear_to_shoulder_mm', 0)
+            if m_ear_sh == 0 and pt_a and pt_b:
+                m_ear_sh = np.sqrt((pt_b[0]-pt_a[0])**2 + (pt_b[1]-pt_a[1])**2) * mm_per_px
+            
+            m_sh_pel = lat_dists.get('shoulder_to_pelvic_mm', 0)
+            if m_sh_pel == 0 and pt_b and pt_e:
+                m_sh_pel = np.sqrt((pt_e[0]-pt_b[0])**2 + (pt_e[1]-pt_b[1])**2) * mm_per_px
+                
+            m_pel_wd = lat_dists.get('pelvic_width_mm', 0)
+            if m_pel_wd == 0 and pt_c and pt_d:
+                m_pel_wd = np.sqrt((pt_d[0]-pt_c[0])**2 + (pt_d[1]-pt_c[1])**2) * mm_per_px
+
+            # DRAW MULTICOLOR SIDE SKELETON (A-B-E-F-G)
+            # A to B (Ear to Shoulder) - Green
+            if pt_a and pt_b: cv2.line(img_vis, pt_a, pt_b, (0, 255, 0), 4, cv2.LINE_AA)
+            # B to E (Shoulder to Pelvic) - Yellow
+            if pt_b and pt_e: cv2.line(img_vis, pt_b, pt_e, (0, 255, 255), 4, cv2.LINE_AA)
+            # E to F (Pelvic to Knee) - Cyan
+            if pt_e and pt_f: cv2.line(img_vis, pt_e, pt_f, (255, 255, 0), 4, cv2.LINE_AA)
+            # F to G (Knee to Ankle) - Magenta
+            if pt_f and pt_g: cv2.line(img_vis, pt_f, pt_g, (255, 0, 255), 4, cv2.LINE_AA)
+            # C to D (Pelvic width) - Red
+            if pt_c and pt_d: cv2.line(img_vis, pt_c, pt_d, (0, 0, 255), 4, cv2.LINE_AA)
+            
+            # MEASUREMENT LABELS WITH CONTRAST
+            if pt_a and pt_b:
+                label_text = f"{m_ear_sh:.1f}mm"
+                mid_x, mid_y = (pt_a[0] + pt_b[0]) // 2, (pt_a[1] + pt_b[1]) // 2
+                (tw, th), _ = cv2.getTextSize(label_text, font, 0.7, 2)
+                cv2.rectangle(img_vis, (mid_x+10, mid_y-th-10), (mid_x+tw+20, mid_y+10), (0,0,0), -1)
+                cv2.putText(img_vis, label_text, (mid_x+15, mid_y), font, 0.7, (0, 255, 0), 2)
+
+            if pt_b and pt_e:
+                label_text = f"{m_sh_pel:.1f}mm"
+                mid_x, mid_y = (pt_b[0] + pt_e[0]) // 2, (pt_b[1] + pt_e[1]) // 2
+                (tw, th), _ = cv2.getTextSize(label_text, font, 0.7, 1)
+                cv2.rectangle(img_vis, (mid_x+10, mid_y-th-10), (mid_x+tw+20, mid_y+10), (0,0,0), -1)
+                cv2.putText(img_vis, label_text, (mid_x+15, mid_y), font, 0.7, (0, 255, 255), 2)
+
+            if pt_c and pt_d:
+                label_text = f"{m_pel_wd:.1f}mm"
+                mid_x, mid_y = (pt_c[0] + pt_d[0]) // 2, (pt_c[1] + pt_d[1]) // 2
+                (tw, th), _ = cv2.getTextSize(label_text, font, 0.7, 2)
+                cv2.rectangle(img_vis, (mid_x-tw//2-10, mid_y-th-10), (mid_x+tw//2+10, mid_y+10), (0,0,0), -1)
+                cv2.putText(img_vis, label_text, (mid_x-tw//2, mid_y), font, 0.7, (255, 255, 255), 2)
+
+        elif keypoints_dict:
+            # FRONTAL (ANTERIOR/POSTERIOR) SKELETON & MEASUREMENTS
             skeleton_pairs = [
                 ('left_shoulder', 'right_shoulder'),
                 ('left_shoulder', 'left_hip'), ('right_shoulder', 'right_hip'),
-                ('left_hip', 'right_hip'), # Pelvic line
+                ('left_hip', 'right_hip'),
                 ('left_hip', 'left_knee'), ('right_hip', 'right_knee'),
                 ('left_knee', 'left_ankle'), ('right_knee', 'right_ankle')
             ]
-
-            # Add Spine connection (Mid-shoulder to Mid-hip)
-            l_sh = keypoints_dict.get('left_shoulder')
-            r_sh = keypoints_dict.get('right_shoulder')
-            l_hp = keypoints_dict.get('left_hip')
-            r_hp = keypoints_dict.get('right_hip')
-            if all(k and k.get('visible') for k in [l_sh, r_sh, l_hp, r_hp]):
-                mid_sh = (int((l_sh['x'] + r_sh['x'])/2), int((l_sh['y'] + r_sh['y'])/2))
-                mid_hp = (int((l_hp['x'] + r_hp['x'])/2), int((l_hp['y'] + r_hp['y'])/2))
-                cv2.line(img_vis, mid_sh, mid_hp, (255, 255, 255), 2, cv2.LINE_AA)
-
-            skeleton_count = 0
             for start_k, end_k in skeleton_pairs:
-                kp1 = keypoints_dict.get(start_k)
-                kp2 = keypoints_dict.get(end_k)
+                kp1, kp2 = keypoints_dict.get(start_k), keypoints_dict.get(end_k)
                 if kp1 and kp2 and kp1.get('visible') and kp2.get('visible'):
-                    pt1 = (int(kp1['x']), int(kp1['y']))
-                    pt2 = (int(kp2['x']), int(kp2['y']))
-                    
-                    if is_in_bbox(pt1, person_bbox) and is_in_bbox(pt2, person_bbox):
-                        cv2.line(img_vis, pt1, pt2, (255, 255, 255), 2, cv2.LINE_AA)
-                        skeleton_count += 1
-            
-            print(f"✅ Skeleton lines drawn: {skeleton_count}")
+                    cv2.line(img_vis, (int(kp1['x']), int(kp1['y'])), (int(kp2['x']), int(kp2['y'])), (255, 255, 255), 2, cv2.LINE_AA)
 
-            # Draw keypoints
-            keypoint_count = 0
-            for kp_name, kp_data in keypoints_dict.items():
-                if kp_data and kp_data.get('visible'):
-                    pt = (int(kp_data['x']), int(kp_data['y']))
-                    if is_in_bbox(pt, person_bbox):
-                        cv2.circle(img_vis, pt, 5, (255, 255, 255), -1, cv2.LINE_AA)
-                        cv2.circle(img_vis, pt, 3, (255, 255, 0), -1, cv2.LINE_AA)
-                        keypoint_count += 1
-            
-            print(f"✅ Keypoints drawn: {keypoint_count}")
+            # --- A-B Shoulder Width ---
+            rs, ls = keypoints_dict.get('right_shoulder'), keypoints_dict.get('left_shoulder')
+            if rs and ls and rs.get('visible') and ls.get('visible'):
+                pt_a, pt_b = (int(rs['x']), int(rs['y'])), (int(ls['x']), int(ls['y']))
+                cv2.line(img_vis, pt_a, pt_b, (0, 255, 255), 5, cv2.LINE_AA)
+                dist_mm = np.sqrt((pt_b[0]-pt_a[0])**2 + (pt_b[1]-pt_a[1])**2) * mm_per_px
+                mid_x, mid_y = (pt_a[0] + pt_b[0]) // 2, (pt_a[1] + pt_b[1]) // 2
+                label_width = f"SHOULDER (A-B): {dist_mm:.1f}mm"
+                (tw, th), _ = cv2.getTextSize(label_width, font, 0.8, 2)
+                cv2.rectangle(img_vis, (mid_x-tw//2-10, mid_y-th-35), (mid_x+tw//2+10, mid_y-15), (0,0,0), -1)
+                cv2.putText(img_vis, label_width, (mid_x-tw//2, mid_y-25), font, 0.8, (0, 255, 255), 2)
+                
+                # --- Shoulder Height Difference ---
+                # Draw a horizontal line from the HIGHER shoulder to the x-coord of the LOWER shoulder
+                # Then a vertical line down to the LOWER shoulder
+                if pt_a[1] < pt_b[1]: # Right shoulder (A) is higher (smaller y)
+                    high_pt, low_pt = pt_a, pt_b
+                    side = -1 # Label on left
+                else: # Left shoulder (B) is higher
+                    high_pt, low_pt = pt_b, pt_a
+                    side = 1 # Label on right
+                
+                corner_pt = (low_pt[0], high_pt[1])
+                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA) # Horizontal
+                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA) # Vertical
+                
+                corner_pt = (low_pt[0], high_pt[1])
+                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA) # Horizontal
+                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA) # Vertical
+                
+                # USE BACKEND VALUE FOR CONSISTENCY
+                sh_data = self.analysis_data.get('shoulder', {})
+                h_diff = sh_data.get('shoulder_height_diff_mm', sh_data.get('height_difference_mm', 0))
+                # Fallback only if missing (should not happen if keypoints valid)
+                if h_diff == 0:
+                     h_diff = abs(pt_a[1] - pt_b[1]) * mm_per_px
+                
+                label_h = f"Diff: {h_diff:.1f}mm"
+                (tw_h, th_h), _ = cv2.getTextSize(label_h, font, 0.6, 2)
+                
+                # Position label near the vertical line
+                lbl_x = low_pt[0] + (10 * side) - (tw_h if side == -1 else 0)
+                lbl_y = (low_pt[1] + corner_pt[1]) // 2
+                cv2.rectangle(img_vis, (lbl_x-5, lbl_y-th_h-5), (lbl_x+tw_h+5, lbl_y+5), (255, 255, 255), -1)
+                cv2.putText(img_vis, label_h, (lbl_x, lbl_y), font, 0.6, (255, 0, 0), 2)
 
-            # ============================================================
-            # PELVIC LINE - MEDICALLY CATEGORIZED (FRONTAL vs LATERAL)
-            # ============================================================
-            
-            l_hip = keypoints_dict.get('left_hip')
-            r_hip = keypoints_dict.get('right_hip')
-            l_ankle = keypoints_dict.get('left_ankle')
-            r_ankle = keypoints_dict.get('right_ankle')
-            
-            # Helper for points
-            def get_pt(k): return (int(k['x']), int(k['y'])) if k and k.get('visible') else None
+            # --- C-D Hip Width ---
+            rh, lh = keypoints_dict.get('right_hip'), keypoints_dict.get('left_hip')
+            if rh and lh and rh.get('visible') and lh.get('visible'):
+                pt_c, pt_d = (int(rh['x']), int(rh['y'])), (int(lh['x']), int(lh['y']))
+                cv2.line(img_vis, pt_c, pt_d, (255, 0, 255), 5, cv2.LINE_AA)
+                dist_mm = np.sqrt((pt_d[0]-pt_c[0])**2 + (pt_d[1]-pt_c[1])**2) * mm_per_px
+                mid_x, mid_y = (pt_c[0] + pt_d[0]) // 2, (pt_c[1] + pt_d[1]) // 2
+                label_width = f"HIP (C-D): {dist_mm:.1f}mm"
+                (tw, th), _ = cv2.getTextSize(label_width, font, 0.8, 2)
+                cv2.rectangle(img_vis, (mid_x-tw//2-10, mid_y+15), (mid_x+tw//2+10, mid_y+th+35), (0,0,0), -1)
+                cv2.putText(img_vis, label_width, (mid_x-tw//2, mid_y+35), font, 0.8, (255, 0, 255), 2)
 
-            pt_lh = get_pt(l_hip)
-            pt_rh = get_pt(r_hip)
-            pt_la = get_pt(l_ankle)
-            pt_ra = get_pt(r_ankle)
-
-            l_hip_valid = pt_lh is not None
-            r_hip_valid = pt_rh is not None
-
-            mm_per_px = self.analysis_data.get('mm_per_pixel', 0.25)
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            
-            if self._is_frontal():
-                # FRONT/BACK: Connect Left and Right Hips
-                if pt_lh and pt_rh:
-                    dist_mm = np.sqrt((pt_rh[0] - pt_lh[0])**2 + (pt_rh[1] - pt_lh[1])**2) * mm_per_px
-                    cv2.line(img_vis, pt_lh, pt_rh, (255, 0, 255), 5, cv2.LINE_AA)
-                    
-                    mid_x, mid_y = (pt_lh[0] + pt_rh[0]) // 2, (pt_lh[1] + pt_rh[1]) // 2
-                    label_text = f"PELVIC: {dist_mm:.1f}mm"
-                    
-                    # Draw text with background
-                    (tw, th), _ = cv2.getTextSize(label_text, font, 0.8, 2)
-                    cv2.rectangle(img_vis, (mid_x - tw//2 - 10, mid_y - th - 15), (mid_x + tw//2 + 10, mid_y + 10), (0,0,0), -1)
-                    cv2.rectangle(img_vis, (mid_x - tw//2 - 10, mid_y - th - 15), (mid_x + tw//2 + 10, mid_y + 10), (255,255,255), 2)
-                    cv2.putText(img_vis, label_text, (mid_x - tw//2, mid_y - 5), font, 0.8, (255, 0, 255), 2)
-                    
-                    # Endpoints
-                    cv2.circle(img_vis, pt_lh, 10, (255, 0, 255), -1)
-                    cv2.circle(img_vis, pt_rh, 10, (255, 0, 255), -1)
-            else:
-                # LATERAL (SIDE): Connect Hip to Ankle on the visible side
-                # Determine visible side based on confidence
-                side_pt_h, side_pt_a = None, None
-                side_label = ""
-                
-                if pt_lh and pt_la and (not pt_rh or l_hip.get('confidence', 0) > r_hip.get('confidence', 0)):
-                    side_pt_h, side_pt_a = pt_lh, pt_la
-                    side_label = "L"
-                elif pt_rh and pt_ra:
-                    side_pt_h, side_pt_a = pt_rh, pt_ra
-                    side_label = "R"
-                
-                if side_pt_h and side_pt_a:
-                    dist_mm = np.sqrt((side_pt_a[0] - side_pt_h[0])**2 + (side_pt_a[1] - side_pt_h[1])**2) * mm_per_px
-                    # Draw INCLINATION line
-                    cv2.line(img_vis, side_pt_h, side_pt_a, (255, 0, 255), 5, cv2.LINE_AA)
-                    
-                    mid_x, mid_y = (side_pt_h[0] + side_pt_a[0]) // 2, (side_pt_h[1] + side_pt_a[1]) // 2
-                    label_text = f"PELVIC ({side_label}): {dist_mm:.1f}mm"
-                    
-                    (tw, th), _ = cv2.getTextSize(label_text, font, 0.8, 2)
-                    cv2.rectangle(img_vis, (mid_x - tw//2 - 10, mid_y - th - 15), (mid_x + tw//2 + 10, mid_y + 10), (0,0,0), -1)
-                    cv2.rectangle(img_vis, (mid_x - tw//2 - 10, mid_y - th - 15), (mid_x + tw//2 + 10, mid_y + 10), (255,255,255), 2)
-                    cv2.putText(img_vis, label_text, (mid_x - tw//2, mid_y - 5), font, 0.8, (255, 0, 255), 2)
-                    
-                    cv2.circle(img_vis, side_pt_h, 10, (255, 0, 255), -1)
-                    cv2.circle(img_vis, side_pt_a, 10, (255, 0, 255), -1)
-            
-            # ============================================================
-            # SHOULDER-HIP LINES (For Frontal/Anterior/Posterior views)
-            # ============================================================
-            
-            if self._is_frontal():
-                # Already have l_hip, r_hip, l_hip_valid, r_hip_valid from pelvic section
-                l_shoulder = keypoints_dict.get('left_shoulder')
-                r_shoulder = keypoints_dict.get('right_shoulder')
-                
-                l_shoulder_valid = l_shoulder and l_shoulder.get('visible')
-                r_shoulder_valid = r_shoulder and r_shoulder.get('visible')
-                
-                # LEFT shoulder-hip
-                if l_shoulder_valid and l_hip_valid:
-                    pt_s = (int(l_shoulder['x']), int(l_shoulder['y']))
-                    pt_h = (int(l_hip['x']), int(l_hip['y']))
-                    
-                    dist_px = np.sqrt((pt_h[0] - pt_s[0])**2 + (pt_h[1] - pt_s[1])**2)
-                    dist_mm = dist_px * mm_per_px
-                    
-                    # Draw CYAN line
-                    cv2.line(img_vis, pt_s, pt_h, (255, 255, 0), 5, cv2.LINE_AA)
-                    
-                    mid_x, mid_y = (pt_s[0] + pt_h[0]) // 2, (pt_s[1] + pt_h[1]) // 2
-                    label = f"L: {dist_mm:.1f}mm"
-                    
-                    (lw, lh), _ = cv2.getTextSize(label, font, 0.7, 2)
-                    cv2.rectangle(img_vis, (mid_x-lw-15, mid_y-lh-10), (mid_x-5, mid_y+5), (0,0,0), -1)
-                    cv2.rectangle(img_vis, (mid_x-lw-15, mid_y-lh-10), (mid_x-5, mid_y+5), (255,255,0), 2)
-                    cv2.putText(img_vis, label, (mid_x-lw-10, mid_y-5), font, 0.7, (255,255,0), 2)
-                
-                # RIGHT shoulder-hip
-                if r_shoulder_valid and r_hip_valid:
-                    pt_s = (int(r_shoulder['x']), int(r_shoulder['y']))
-                    pt_h = (int(r_hip['x']), int(r_hip['y']))
-                    
-                    dist_px = np.sqrt((pt_h[0] - pt_s[0])**2 + (pt_h[1] - pt_s[1])**2)
-                    dist_mm = dist_px * mm_per_px
-                    
-                    # Draw YELLOW line
-                    cv2.line(img_vis, pt_s, pt_h, (0, 255, 255), 5, cv2.LINE_AA)
-                    
-                    mid_x, mid_y = (pt_s[0] + pt_h[0]) // 2, (pt_s[1] + pt_h[1]) // 2
-                    label = f"R: {dist_mm:.1f}mm"
-                    
-                    (lw, lh), _ = cv2.getTextSize(label, font, 0.7, 2)
-                    cv2.rectangle(img_vis, (mid_x+5, mid_y-lh-10), (mid_x+lw+15, mid_y+5), (0,0,0), -1)
-                    cv2.rectangle(img_vis, (mid_x+5, mid_y-lh-10), (mid_x+lw+15, mid_y+5), (0,255,255), 2)
-                    cv2.putText(img_vis, label, (mid_x+10, mid_y-5), font, 0.7, (0,255,255), 2)
-                
-                # Draw pelvic side shift shift
-                if hasattr(self, '_draw_pelvic_side_shift'):
-                    try:
-                        img_vis = self._draw_pelvic_side_shift(img_vis, keypoints_dict, plumb_x)
-                    except: pass
-                
-                # Draw shoulder level line
-                if l_shoulder_valid and r_shoulder_valid:
-                    cv2.line(img_vis, (int(l_shoulder['x']), int(l_shoulder['y'])),
-                            (int(r_shoulder['x']), int(r_shoulder['y'])), (0, 255, 255), 2, cv2.LINE_AA)
-                    print("✅ Shoulder level line drawn")
+                # --- Hip Height Difference ---
+                if pt_c[1] < pt_d[1]: # Right hip (C) is higher
+                    high_pt, low_pt = pt_c, pt_d
+                    side = -1
                 else:
-                    print("❌ Cannot draw shoulder level line")
+                    high_pt, low_pt = pt_d, pt_c
+                    side = 1
+                
+                corner_pt = (low_pt[0], high_pt[1])
+                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA)
+                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA)
+                
+                corner_pt = (low_pt[0], high_pt[1])
+                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA)
+                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA)
+                
+                # USE BACKEND VALUE FOR CONSISTENCY
+                hip_data = self.analysis_data.get('hip', {})
+                h_diff = hip_data.get('hip_height_diff_mm', hip_data.get('height_difference_mm', 0))
+                if h_diff == 0:
+                    h_diff = abs(pt_c[1] - pt_d[1]) * mm_per_px
+
+                label_h = f"Diff: {h_diff:.1f}mm"
+                (tw_h, th_h), _ = cv2.getTextSize(label_h, font, 0.6, 2)
+                
+                lbl_x = low_pt[0] + (10 * side) - (tw_h if side == -1 else 0)
+                lbl_y = (low_pt[1] + corner_pt[1]) // 2
+                cv2.rectangle(img_vis, (lbl_x-5, lbl_y-th_h-5), (lbl_x+tw_h+5, lbl_y+5), (255, 255, 255), -1)
+                cv2.putText(img_vis, label_h, (lbl_x, lbl_y), font, 0.6, (255, 0, 0), 2)
+
+            # Shoulder-Hip lines (vertical connections)
+            if ls and lh and ls.get('visible') and lh.get('visible'):
+                cv2.line(img_vis, (int(ls['x']), int(ls['y'])), (int(lh['x']), int(lh['y'])), (200, 200, 200), 2, cv2.LINE_AA)
+            if rs and rh and rs.get('visible') and rh.get('visible'):
+                cv2.line(img_vis, (int(rs['x']), int(rs['y'])), (int(rh['x']), int(rh['y'])), (200, 200, 200), 2, cv2.LINE_AA)
+
+        # ============================================================
+        # DRAW KEYPOINTS & LABELS (ALWAYS)
+        # ============================================================
+        labels_map = {
+            'lateral_ear': 'A', 'lateral_shoulder': 'B', 'lateral_pelvic_back': 'C',
+            'lateral_pelvic_front': 'D', 'lateral_pelvic_center': 'E', 'lateral_knee': 'F',
+            'lateral_ankle': 'G',
+            'right_shoulder': 'A', 'left_shoulder': 'B', 
+            'right_hip': 'C', 'left_hip': 'D',
+            'right_knee': 'E', 'left_knee': 'F', 
+            'right_ankle': 'G', 'left_ankle': 'H'
+        }
+
+        is_lateral_view = self._is_lateral()
+        for kp_name, k in keypoints_dict.items():
+            # FILTER: Only draw 'lateral_*' points in lateral view, 
+            # and only 'regular' points in frontal view to avoid duplicates.
+            if is_lateral_view and not kp_name.startswith('lateral_'):
+                continue
+            if not is_lateral_view and kp_name.startswith('lateral_'):
+                continue
+
+            if k and k.get('visible'):
+                pt = (int(k['x']), int(k['y']))
+                if is_in_bbox(pt, person_bbox):
+                    # Point Circle
+                    cv2.circle(img_vis, pt, 7, (255, 255, 255), -1, cv2.LINE_AA)
+                    cv2.circle(img_vis, pt, 4, (255, 100, 0) if 'lateral' in kp_name else (0, 100, 255), -1, cv2.LINE_AA)
+                    
+                    # Label
+                    if kp_name in labels_map:
+                        lbl = labels_map[kp_name]
+                        # Different color/offset for lateral vs frontal
+                        if 'lateral' in kp_name:
+                            color = (0, 255, 0)
+                            offset = (20, -10)
+                        else:
+                            color = (255, 255, 255)
+                            offset = (-30 if 'right' in kp_name else 15, -15)
+                        
+                        cv2.putText(img_vis, lbl, (pt[0]+offset[0], pt[1]+offset[1]), font, 1.0, color, 3)
         
         print(f"🎨 Final image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
         print("=" * 60)
@@ -652,7 +690,7 @@ class DetailedReportWindow(tk.Toplevel):
         table_container = tk.Frame(self.content_container, bg='#1E1E1E', relief=tk.FLAT)
         table_container.pack(fill=tk.BOTH, expand=True)
 
-        columns = ('component', 'parameter', 'value', 'unit', 'status', 'score')
+        columns = ('component', 'parameter', 'value', 'unit', 'status')
         
         # Style tweak for Treeview
         style = ttk.Style()
@@ -670,14 +708,12 @@ class DetailedReportWindow(tk.Toplevel):
         self.tree.heading('value', text='VALUE')
         self.tree.heading('unit', text='UNIT')
         self.tree.heading('status', text='STATUS')
-        self.tree.heading('score', text='SCORE')
 
         self.tree.column('component', width=150, anchor='center')
         self.tree.column('parameter', width=250, anchor='w')
         self.tree.column('value', width=100, anchor='center')
         self.tree.column('unit', width=80, anchor='center')
         self.tree.column('status', width=150, anchor='center')
-        self.tree.column('score', width=80, anchor='center')
 
         scrollbar = ttk.Scrollbar(table_container, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
@@ -752,11 +788,8 @@ class DetailedReportWindow(tk.Toplevel):
         
         # Score & Confidence
         conf_color = '#00FF00' if confidence > 80 else '#FFA500' if confidence > 60 else '#FF0000'
-        score_data = self.analysis_data.get('posture_score', {})
-        final_score = score_data.get('adjusted_score', 0)
-        score_color = '#00FF00' if final_score > 80 else '#FFA500' if final_score > 60 else '#FF0000'
-
-        self._create_info_card(right_col, "POSTURE SCORE", f"{final_score:.1f}/100", score_color)
+        # Posture score removal requested
+        # self._create_info_card(right_col, "POSTURE SCORE", f"{final_score:.1f}/100", score_color)
         self._create_info_card(right_col, "CONFIDENCE LEVEL", f"{confidence:.1f}%", conf_color)
 
         # detailed measurements section (Merged from _populate_measurements_content)
@@ -805,15 +838,15 @@ class DetailedReportWindow(tk.Toplevel):
             # Shoulder
             tk.Label(m_left, text="SHOULDER ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
             self._add_detail_row(m_left, "Height Diff:", f"{sh_data.get('height_difference_mm', 0):.2f} mm")
-            self._add_detail_row(m_left, "Slope Angle:", f"{sh_data.get('slope_angle_deg', 0):.2f}°")
+            self._add_detail_row(m_left, "Width (A-B):", f"{sh_data.get('width_mm', 0):.2f} mm")
             self._add_detail_row(m_left, "Status:", sh_data.get('status', 'N/A'))
             
             tk.Frame(m_left, bg='#121212', height=20).pack() # Spacer
 
-            # Spine
-            tk.Label(m_left, text="SPINAL ALIGNMENT", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
-            self._add_detail_row(m_left, "Lateral Deviation:", f"{spine_data.get('lateral_deviation_mm', 0):.2f} mm")
-            self._add_detail_row(m_left, "Status:", spine_data.get('status', 'N/A'))
+            # Spine removed from report as requested
+            # tk.Label(m_left, text="SPINAL ALIGNMENT", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            # self._add_detail_row(m_left, "Lateral Deviation:", f"{spine_data.get('lateral_deviation_mm', 0):.2f} mm")
+            # self._add_detail_row(m_left, "Status:", spine_data.get('status', 'N/A'))
 
             # Right side: Hip/Pelvis
             m_right = tk.Frame(measurements_frame, bg='#121212')
@@ -822,7 +855,7 @@ class DetailedReportWindow(tk.Toplevel):
             # Hip
             tk.Label(m_right, text="HIP & PELVIS ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
             self._add_detail_row(m_right, "Height Diff:", f"{hip_data.get('height_difference_mm', 0):.2f} mm")
-            self._add_detail_row(m_right, "Pelvic Tilt:", f"{hip_data.get('pelvic_tilt_angle', 0):.2f}°")
+            self._add_detail_row(m_right, "Width (C-D):", f"{hip_data.get('width_mm', 0):.2f} mm")
             self._add_detail_row(m_right, "Status:", hip_data.get('status', 'N/A'))
 
         else:
@@ -831,10 +864,36 @@ class DetailedReportWindow(tk.Toplevel):
             m_frame = tk.Frame(measurements_frame, bg='#121212')
             m_frame.grid(row=row_counter, column=0, columnspan=2, sticky='nsew')
 
-            tk.Label(m_frame, text="HEAD POSITION ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
-            self._add_detail_row(m_frame, "Forward Shift:", f"{head_data.get('shift_mm', 0):.2f} mm")
-            self._add_detail_row(m_frame, "Tilt Angle:", f"{head_data.get('tilt_angle', 0):.2f}°")
-            self._add_detail_row(m_frame, "Status:", head_data.get('status', 'N/A'))
+            tk.Label(m_frame, text="LATERAL ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            lat_dists = self.analysis_data.get('lateral_distances', {})
+            keypoints = self.analysis_data.get('keypoints', {})
+            mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+
+            def get_lat_dist(key, p1_name, p2_name):
+                val = lat_dists.get(key, 0)
+                if val == 0:
+                    k1 = keypoints.get(f'lateral_{p1_name}')
+                    k2 = keypoints.get(f'lateral_{p2_name}')
+                    if k1 and k2:
+                        dist_px = np.sqrt((k1['x']-k2['x'])**2 + (k1['y']-k2['y'])**2)
+                        val = dist_px * mm_per_px
+                return val
+
+            m_head = get_lat_dist('head_shift_mm', 'ear', 'shoulder')
+            if m_head == 0: m_head = get_lat_dist('ear_to_shoulder_mm', 'ear', 'shoulder')
+            
+            m_spine = get_lat_dist('spine_shift_mm', 'shoulder', 'pelvic_center')
+            if m_spine == 0: m_spine = get_lat_dist('shoulder_to_pelvic_mm', 'shoulder', 'pelvic_center')
+            
+            m_pelvic = get_lat_dist('pelvic_shift_mm', 'pelvic_back', 'pelvic_front')
+            if m_pelvic == 0: m_pelvic = get_lat_dist('pelvic_width_mm', 'pelvic_back', 'pelvic_front')
+
+            self._add_detail_row(m_frame, "Head Shift (A-B):", f"{m_head:.2f} mm")
+            self._add_detail_row(m_frame, "Spine Shift (B-E):", f"{m_spine:.2f} mm")
+            self._add_detail_row(m_frame, "Pelvic Shift (C-D):", f"{m_pelvic:.2f} mm")
+            # Head alignment (Tilt/Shift) preserved or optional?
+            # self._add_detail_row(m_frame, "Forward Shift:", f"{head_data.get('shift_mm', 0):.2f} mm")
+            # self._add_detail_row(m_frame, "Status:", head_data.get('status', 'N/A'))
 
     def _add_detail_row(self, parent, label, value):
         f = tk.Frame(parent, bg='#121212')
@@ -923,29 +982,58 @@ class DetailedReportWindow(tk.Toplevel):
         if self._is_frontal():
             sh_data = self.analysis_data.get('shoulder', {})
             if sh_data:
-                rows.append(('Shoulder', 'Height Difference', f"{sh_data.get('height_difference_mm', 0):.2f}", 'mm', sh_data.get('status', '-'), f"{sh_data.get('score', 0):.0f}"))
-                rows.append(('Shoulder', 'Slope Angle', f"{sh_data.get('slope_angle_deg', 0):.2f}", 'deg', '-', '-'))
+                rows.append(('Shoulder', 'Height Difference', f"{sh_data.get('shoulder_height_diff_mm', sh_data.get('height_difference_mm', 0)):.2f}", 'mm', sh_data.get('status', '-')))
+                rows.append(('Shoulder', 'Width (A-B)', f"{sh_data.get('width_mm', 0):.2f}", 'mm', '-'))
+                # Slope angle removed as requested
+                # rows.append(('Shoulder', 'Slope Angle', f"{sh_data.get('slope_angle_deg', 0):.2f}", 'deg', '-', '-'))
 
             hip_data = self.analysis_data.get('hip', {})
             if hip_data:
-                rows.append(('Hip/Pelvis', 'Height Difference', f"{hip_data.get('height_difference_mm', 0):.2f}", 'mm', hip_data.get('status', '-'), f"{hip_data.get('score', 0):.0f}"))
-                rows.append(('Hip/Pelvis', 'Pelvic Tilt', f"{hip_data.get('pelvic_tilt_angle', 0):.2f}", 'deg', '-', '-'))
+                rows.append(('Hip/Pelvis', 'Height Difference', f"{hip_data.get('hip_height_diff_mm', hip_data.get('height_difference_mm', 0)):.2f}", 'mm', hip_data.get('status', '-')))
+                rows.append(('Hip/Pelvis', 'Width (C-D)', f"{hip_data.get('width_mm', 0):.2f}", 'mm', '-'))
+                # Pelvic Tilt removed as requested
+                # rows.append(('Hip/Pelvis', 'Pelvic Tilt', f"{hip_data.get('pelvic_tilt_angle', 0):.2f}", 'deg', '-', '-'))
 
-            spine_data = self.analysis_data.get('spinal', {})
-            if spine_data:
-                rows.append(('Spine', 'Lateral Deviation', f"{spine_data.get('lateral_deviation_mm', 0):.2f}", 'mm', spine_data.get('status', '-'), f"{spine_data.get('score', 0):.0f}"))
+            # Spine removed as requested
+            # spine_data = self.analysis_data.get('spinal', {})
 
-        elif self._is_lateral():
-            head_data = self.analysis_data.get('head', {})
-            if head_data:
-                rows.append(('Head', 'Forward Shift', f"{head_data.get('shift_mm', 0):.2f}", 'mm', head_data.get('status', '-'), f"{head_data.get('score', 0):.0f}"))
-                rows.append(('Head', 'Tilt Angle', f"{head_data.get('tilt_angle', 0):.2f}", 'deg', '-', '-'))
+        elif self._is_lateral() or 'kiri' in str(self.view_type).lower() or 'kanan' in str(self.view_type).lower():
+            lat_dists = self.analysis_data.get('lateral_distances', {})
+            keypoints = self.analysis_data.get('keypoints', {})
+            mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+            
+            def get_lat_dist(key, p1_name, p2_name):
+                val = lat_dists.get(key, 0)
+                if val == 0:
+                    k1 = keypoints.get(f'lateral_{p1_name}')
+                    k2 = keypoints.get(f'lateral_{p2_name}')
+                    if k1 and k2:
+                        dist_px = np.sqrt((k1['x']-k2['x'])**2 + (k1['y']-k2['y'])**2)
+                        val = dist_px * mm_per_px
+                return val
 
-            angles = self.analysis_data.get('postural_angles', {})
-            if angles.get('kyphosis_angle'):
-                 rows.append(('Thoracic', 'Kyphosis Angle', f"{angles['kyphosis_angle']:.2f}", 'deg', 'Measured', '-'))
-            if angles.get('lordosis_angle'):
-                 rows.append(('Lumbar', 'Lordosis Angle', f"{angles['lordosis_angle']:.2f}", 'deg', 'Measured', '-'))
+            m_head = get_lat_dist('head_shift_mm', 'ear', 'shoulder')
+            if m_head == 0: m_head = get_lat_dist('ear_to_shoulder_mm', 'ear', 'shoulder')
+            
+            m_spine = get_lat_dist('spine_shift_mm', 'shoulder', 'pelvic_center')
+            if m_spine == 0: m_spine = get_lat_dist('shoulder_to_pelvic_mm', 'shoulder', 'pelvic_center')
+            
+            m_pelvic = get_lat_dist('pelvic_shift_mm', 'pelvic_back', 'pelvic_front')
+            if m_pelvic == 0: m_pelvic = get_lat_dist('pelvic_width_mm', 'pelvic_back', 'pelvic_front')
+
+            if m_head > 0 or m_spine > 0 or m_pelvic > 0:
+                rows.append(('Lateral', 'Head Shift (A-B)', f"{m_head:.2f}", 'mm', 'Measured'))
+                rows.append(('Lateral', 'Spine Shift (B-E)', f"{m_spine:.2f}", 'mm', 'Measured'))
+                rows.append(('Lateral', 'Pelvic Shift (C-D)', f"{m_pelvic:.2f}", 'mm', 'Measured'))
+            else:
+                # Fallback if no distances, use head data
+                head_data = self.analysis_data.get('head', {})
+                if head_data:
+                    rows.append(('Head', 'Forward Shift', f"{head_data.get('shift_mm', 0):.2f}", 'mm', head_data.get('status', '-')))
+
+            # Lumbar removed as requested
+            # angles = self.analysis_data.get('postural_angles', {})
+            # if angles.get('lordosis_angle'): ...
 
         for row in rows:
             tags = ()
@@ -972,7 +1060,7 @@ class DetailedReportWindow(tk.Toplevel):
             if file_path:
                 with open(file_path, mode='w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['Component', 'Parameter', 'Value', 'Unit', 'Status', 'Score'])
+                    writer.writerow(['Component', 'Parameter', 'Value', 'Unit', 'Status'])
                     for item in self.tree.get_children():
                         row = self.tree.item(item)['values']
                         writer.writerow(row)
