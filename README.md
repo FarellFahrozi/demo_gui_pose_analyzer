@@ -26,6 +26,7 @@ The **KURO Performance AI Postural Assessment System** is a professional-grade c
   *   **Head Alignment**: Forward head posture and shift assessment.
 - **Medically Valid Visualizations**: 
   *   High-contrast overlays for professional clinician reports.
+  *   **Enhanced Clarity**: Clear legends and on-graph measurement annotations (mm).
   *   Lateral views feature B-E-F vertical alignment and slanted C-D pelvic line.
   *   All keypoints clipped to person's bounding box for anatomical accuracy.
 

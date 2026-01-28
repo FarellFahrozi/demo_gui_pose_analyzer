@@ -241,7 +241,8 @@ class ResultsScreen(ttk.Frame):
 
         print(f"🖼️ Image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
         
-        keypoints_dict = self.analysis_data.get('keypoints', {})
+        import copy
+        keypoints_dict = copy.deepcopy(self.analysis_data.get('keypoints', {}))
         h, w, _ = img_vis.shape
         plumb_x = w // 2
 
@@ -259,25 +260,36 @@ class ResultsScreen(ttk.Frame):
         #     img_vis, plumb_x = self._draw_plumb_line(img_vis, keypoints_dict, person_bbox)
         #     print(f"✅ Plumb line drawn at x={plumb_x}")
 
-        # Draw detection bounding boxes
-        if detections and 'all_detections' in detections:
-            for det in detections['all_detections']:
-                bbox = det.get('bbox', {})
-                if bbox:
-                    x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
-                    cls_name = det.get('classification', 'Person')
-                    confidence = det.get('confidence', 0) * 100
-                    
-                    color = (0, 255, 0)
-                    if 'Kyphosis' in cls_name: color = (255, 0, 0)
-                    elif 'Lordosis' in cls_name: color = (255, 255, 0)
-                    elif 'Swayback' in cls_name: color = (255, 0, 255)
+        # Draw detection bounding boxes (Only highest confidence to avoid ambiguity - Phase 38)
+        if detections and 'all_detections' in detections and detections['all_detections']:
+            # Sort by confidence descending
+            sorted_dets = sorted(detections['all_detections'], key=lambda x: x.get('confidence', 0), reverse=True)
+            det = sorted_dets[0] # Pick the first one (highest confidence)
+            
+            bbox = det.get('bbox', {})
+            if bbox:
+                x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
+                cls_name = det.get('classification', 'Person')
+                confidence = det.get('confidence', 0) * 100
+                
+                color = (0, 255, 0)
+                if 'Kyphosis' in cls_name: color = (255, 0, 0)
+                elif 'Lordosis' in cls_name: color = (255, 255, 0)
+                elif 'Swayback' in cls_name: color = (255, 0, 255)
 
-                    cv2.rectangle(img_vis, (x1, y1), (x2, y2), color, 2)
-                    label = f"{cls_name} {confidence:.1f}%"
-                    cv2.putText(img_vis, label, (x1, y1-5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                    print(f"✅ BBox drawn: {cls_name}")
+                cv2.rectangle(img_vis, (x1, y1), (x2, y2), color, 2)
+                
+                # Simplify classification label for display
+                disp_cls = cls_name
+                if 'Lordosis' in cls_name: disp_cls = 'Lordosis'
+                elif 'Kyphosis' in cls_name: disp_cls = 'Kyphosis'
+                elif 'Swayback' in cls_name: disp_cls = 'Swayback'
+                elif 'Normal' in cls_name: disp_cls = 'Normal'
+                
+                label = f"{disp_cls} {confidence:.1f}%"
+                cv2.putText(img_vis, label, (x1, y1-5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                print(f"✅ Best BBox drawn: {cls_name} ({confidence:.1f}%)")
 
         def is_in_bbox(pt, bbox):
             if bbox is None: return True
@@ -290,6 +302,11 @@ class ResultsScreen(ttk.Frame):
         # ============================================================
         font = cv2.FONT_HERSHEY_SIMPLEX
         mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+
+        # OFFSET CORRECTION (USER REQUEST): Shift E and G to the RIGHT
+        if not self._is_lateral() and keypoints_dict:
+             if 'right_knee' in keypoints_dict: keypoints_dict['right_knee']['x'] += 45
+             if 'right_ankle' in keypoints_dict: keypoints_dict['right_ankle']['x'] += 45
 
         if keypoints_dict and self._is_lateral():
             # LATERAL (SIDE): Multicolor skeleton with fail-safe distance calculation
@@ -318,7 +335,16 @@ class ResultsScreen(ttk.Frame):
                 
             m_pel_wd = lat_dists.get('pelvic_width_mm', 0)
             if m_pel_wd == 0 and pt_c and pt_d:
-                m_pel_wd = np.sqrt((pt_d[0]-pt_c[0])**2 + (pt_d[1]-pt_c[1])**2) * mm_per_px
+                m_pel_wd = np.sqrt((pt_d[0]-pt_c[0])**2 + (pt_c[1]-pt_d[1])**2) * mm_per_px
+
+            # New: Leg segments lengths
+            m_thigh = 0
+            if pt_e and pt_f:
+                m_thigh = np.sqrt((pt_f[0]-pt_e[0])**2 + (pt_f[1]-pt_e[1])**2) * mm_per_px
+            
+            m_shin = 0
+            if pt_f and pt_g:
+                m_shin = np.sqrt((pt_g[0]-pt_f[0])**2 + (pt_g[1]-pt_f[1])**2) * mm_per_px
 
             # DRAW MULTICOLOR SIDE SKELETON (A-B-E-F-G)
             # A to B (Ear to Shoulder) - Green
@@ -353,6 +379,20 @@ class ResultsScreen(ttk.Frame):
                 (tw, th), _ = cv2.getTextSize(label_text, font, 0.7, 2)
                 cv2.rectangle(img_vis, (mid_x-tw//2-10, mid_y-th-10), (mid_x+tw//2+10, mid_y+10), (0,0,0), -1)
                 cv2.putText(img_vis, label_text, (mid_x-tw//2, mid_y), font, 0.7, (255, 255, 255), 2)
+                
+            if pt_e and pt_f:
+                label_text = f"{m_thigh:.1f}mm"
+                mid_x, mid_y = (pt_e[0] + pt_f[0]) // 2, (pt_e[1] + pt_f[1]) // 2
+                (tw, th), _ = cv2.getTextSize(label_text, font, 0.7, 2)
+                cv2.rectangle(img_vis, (mid_x+15, mid_y-th-10), (mid_x+tw+25, mid_y+10), (0,0,0), -1)
+                cv2.putText(img_vis, label_text, (mid_x+20, mid_y), font, 0.7, (255, 255, 0), 2)
+
+            if pt_f and pt_g:
+                label_text = f"{m_shin:.1f}mm"
+                mid_x, mid_y = (pt_f[0] + pt_g[0]) // 2, (pt_f[1] + pt_g[1]) // 2
+                (tw, th), _ = cv2.getTextSize(label_text, font, 0.7, 2)
+                cv2.rectangle(img_vis, (mid_x+15, mid_y-th-10), (mid_x+tw+25, mid_y+10), (0,0,0), -1)
+                cv2.putText(img_vis, label_text, (mid_x+20, mid_y), font, 0.7, (255, 0, 255), 2)
 
         elif keypoints_dict:
             # FRONTAL (ANTERIOR/POSTERIOR) SKELETON & MEASUREMENTS
@@ -381,38 +421,12 @@ class ResultsScreen(ttk.Frame):
                 cv2.putText(img_vis, label_width, (mid_x-tw//2, mid_y-25), font, 0.8, (0, 255, 255), 2)
                 
                 # --- Shoulder Height Difference ---
-                # Draw a horizontal line from the HIGHER shoulder to the x-coord of the LOWER shoulder
-                # Then a vertical line down to the LOWER shoulder
-                if pt_a[1] < pt_b[1]: # Right shoulder (A) is higher (smaller y)
-                    high_pt, low_pt = pt_a, pt_b
-                    side = -1 # Label on left
-                else: # Left shoulder (B) is higher
-                    high_pt, low_pt = pt_b, pt_a
-                    side = 1 # Label on right
-                
-                corner_pt = (low_pt[0], high_pt[1])
-                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA) # Horizontal
-                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA) # Vertical
-                
-                corner_pt = (low_pt[0], high_pt[1])
-                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA) # Horizontal
-                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA) # Vertical
-                
-                # USE BACKEND VALUE FOR CONSISTENCY
                 sh_data = self.analysis_data.get('shoulder', {})
                 h_diff = sh_data.get('shoulder_height_diff_mm', sh_data.get('height_difference_mm', 0))
-                # Fallback only if missing (should not happen if keypoints valid)
-                if h_diff == 0:
-                     h_diff = abs(pt_a[1] - pt_b[1]) * mm_per_px
+                if h_diff == 0: # Fallback
+                    h_diff = abs(pt_a[1] - pt_b[1]) * mm_per_px
                 
-                label_h = f"Diff: {h_diff:.1f}mm"
-                (tw_h, th_h), _ = cv2.getTextSize(label_h, font, 0.6, 2)
-                
-                # Position label near the vertical line
-                lbl_x = low_pt[0] + (10 * side) - (tw_h if side == -1 else 0)
-                lbl_y = (low_pt[1] + corner_pt[1]) // 2
-                cv2.rectangle(img_vis, (lbl_x-5, lbl_y-th_h-5), (lbl_x+tw_h+5, lbl_y+5), (255, 255, 255), -1)
-                cv2.putText(img_vis, label_h, (lbl_x, lbl_y), font, 0.6, (255, 0, 0), 2)
+                self._draw_height_diff(img_vis, pt_a, pt_b, mm_per_px, value_mm=h_diff)
 
             # --- C-D Hip Width ---
             rh, lh = keypoints_dict.get('right_hip'), keypoints_dict.get('left_hip')
@@ -421,46 +435,87 @@ class ResultsScreen(ttk.Frame):
                 cv2.line(img_vis, pt_c, pt_d, (255, 0, 255), 5, cv2.LINE_AA)
                 dist_mm = np.sqrt((pt_d[0]-pt_c[0])**2 + (pt_d[1]-pt_c[1])**2) * mm_per_px
                 mid_x, mid_y = (pt_c[0] + pt_d[0]) // 2, (pt_c[1] + pt_d[1]) // 2
-                label_width = f"HIP (C-D): {dist_mm:.1f}mm"
+                label_width = f"PELVIS (C-D): {dist_mm:.1f}mm"
                 (tw, th), _ = cv2.getTextSize(label_width, font, 0.8, 2)
                 cv2.rectangle(img_vis, (mid_x-tw//2-10, mid_y+15), (mid_x+tw//2+10, mid_y+th+35), (0,0,0), -1)
                 cv2.putText(img_vis, label_width, (mid_x-tw//2, mid_y+35), font, 0.8, (255, 0, 255), 2)
 
+
                 # --- Hip Height Difference ---
-                if pt_c[1] < pt_d[1]: # Right hip (C) is higher
-                    high_pt, low_pt = pt_c, pt_d
-                    side = -1
-                else:
-                    high_pt, low_pt = pt_d, pt_c
-                    side = 1
-                
-                corner_pt = (low_pt[0], high_pt[1])
-                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA)
-                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA)
-                
-                corner_pt = (low_pt[0], high_pt[1])
-                cv2.line(img_vis, high_pt, corner_pt, (255, 0, 0), 2, cv2.LINE_AA)
-                cv2.line(img_vis, corner_pt, low_pt, (255, 0, 0), 2, cv2.LINE_AA)
-                
-                # USE BACKEND VALUE FOR CONSISTENCY
                 hip_data = self.analysis_data.get('hip', {})
                 h_diff = hip_data.get('hip_height_diff_mm', hip_data.get('height_difference_mm', 0))
-                if h_diff == 0:
+                if h_diff == 0: # Fallback
                     h_diff = abs(pt_c[1] - pt_d[1]) * mm_per_px
 
-                label_h = f"Diff: {h_diff:.1f}mm"
-                (tw_h, th_h), _ = cv2.getTextSize(label_h, font, 0.6, 2)
-                
-                lbl_x = low_pt[0] + (10 * side) - (tw_h if side == -1 else 0)
-                lbl_y = (low_pt[1] + corner_pt[1]) // 2
-                cv2.rectangle(img_vis, (lbl_x-5, lbl_y-th_h-5), (lbl_x+tw_h+5, lbl_y+5), (255, 255, 255), -1)
-                cv2.putText(img_vis, label_h, (lbl_x, lbl_y), font, 0.6, (255, 0, 0), 2)
+                self._draw_height_diff(img_vis, pt_c, pt_d, mm_per_px, value_mm=h_diff)
 
             # Shoulder-Hip lines (vertical connections)
             if ls and lh and ls.get('visible') and lh.get('visible'):
                 cv2.line(img_vis, (int(ls['x']), int(ls['y'])), (int(lh['x']), int(lh['y'])), (200, 200, 200), 2, cv2.LINE_AA)
             if rs and rh and rs.get('visible') and rh.get('visible'):
                 cv2.line(img_vis, (int(rs['x']), int(rs['y'])), (int(rh['x']), int(rh['y'])), (200, 200, 200), 2, cv2.LINE_AA)
+
+            # --- Leg Alignment (Frontal) ---
+            # Right Leg: C-E-G
+            rh, rk, ra = keypoints_dict.get('right_hip'), keypoints_dict.get('right_knee'), keypoints_dict.get('right_ankle')
+            if rh and rk and ra and rh.get('visible') and rk.get('visible') and ra.get('visible'):
+                pt_c, pt_e, pt_g = (int(rh['x']), int(rh['y'])), (int(rk['x']), int(rk['y'])), (int(ra['x']), int(ra['y']))
+                
+                # C-E segment
+                cv2.line(img_vis, pt_c, pt_e, (0, 255, 255), 3, cv2.LINE_AA)
+                dist_ce = np.sqrt((pt_e[0]-pt_c[0])**2 + (pt_e[1]-pt_c[1])**2) * mm_per_px
+                mid_ce = ((pt_c[0]+pt_e[0])//2, (pt_c[1]+pt_e[1])//2)
+                cv2.putText(img_vis, f"{dist_ce:.1f}mm", (mid_ce[0]-60, mid_ce[1]), font, 0.6, (0, 255, 255), 2)
+                
+                # E-G segment
+                cv2.line(img_vis, pt_e, pt_g, (0, 255, 255), 3, cv2.LINE_AA)
+                dist_eg = np.sqrt((pt_g[0]-pt_e[0])**2 + (pt_g[1]-pt_e[1])**2) * mm_per_px
+                mid_eg = ((pt_e[0]+pt_g[0])//2, (pt_e[1]+pt_g[1])//2)
+                cv2.putText(img_vis, f"{dist_eg:.1f}mm", (mid_eg[0]-60, mid_eg[1]), font, 0.6, (0, 255, 255), 2)
+                
+                leg_ant = self.analysis_data.get('leg_anterior', {})
+                angle_r = leg_ant.get('right_leg_angle', 0)
+                # cv2.putText(img_vis, f"{angle_r:.1f}°", (pt_e[0] - 80, pt_e[1] + 20), font, 0.7, (0, 255, 255), 2)
+
+            # Left Leg: D-F-H
+            lh, lk, la = keypoints_dict.get('left_hip'), keypoints_dict.get('left_knee'), keypoints_dict.get('left_ankle')
+            if lh and lk and la and lh.get('visible') and lk.get('visible') and la.get('visible'):
+                pt_d, pt_f, pt_h = (int(lh['x']), int(lh['y'])), (int(lk['x']), int(lk['y'])), (int(la['x']), int(la['y']))
+                
+                # D-F segment
+                cv2.line(img_vis, pt_d, pt_f, (255, 0, 255), 3, cv2.LINE_AA)
+                dist_df = np.sqrt((pt_f[0]-pt_d[0])**2 + (pt_f[1]-pt_d[1])**2) * mm_per_px
+                mid_df = ((pt_d[0]+pt_f[0])//2, (pt_d[1]+pt_f[1])//2)
+                cv2.putText(img_vis, f"{dist_df:.1f}mm", (mid_df[0]+20, mid_df[1]), font, 0.6, (255, 0, 255), 2)
+                
+                # F-H segment
+                cv2.line(img_vis, pt_f, pt_h, (255, 0, 255), 3, cv2.LINE_AA)
+                dist_fh = np.sqrt((pt_h[0]-pt_f[0])**2 + (pt_h[1]-pt_f[1])**2) * mm_per_px
+                mid_fh = ((pt_f[0]+pt_h[0])//2, (pt_f[1]+pt_h[1])//2)
+                cv2.putText(img_vis, f"{dist_fh:.1f}mm", (mid_fh[0]+20, mid_fh[1]), font, 0.6, (255, 0, 255), 2)
+                
+                leg_ant = self.analysis_data.get('leg_anterior', {})
+                angle_l = leg_ant.get('left_leg_angle', 0)
+                # cv2.putText(img_vis, f"{angle_l:.1f}°", (pt_f[0] + 20, pt_f[1] + 20), font, 0.7, (255, 0, 255), 2)
+
+                # --- Height Differences (Knee & Ankle) ---
+                if rk and lk and rk.get('visible') and lk.get('visible'):
+                    self._draw_height_diff(img_vis, (int(rk['x']), int(rk['y'])), (int(lk['x']), int(lk['y'])), mm_per_px)
+                
+                if ra and la and ra.get('visible') and la.get('visible'):
+                    self._draw_height_diff(img_vis, (int(ra['x']), int(ra['y'])), (int(la['x']), int(la['y'])), mm_per_px)
+
+                # --- Inter-knee/ankle measurements ---
+                ik_mm = leg_ant.get('inter_knee_mm', 0)
+                ia_mm = leg_ant.get('inter_ankle_mm', 0)
+                
+                if ik_mm > 0:
+                     mid_knees = ( (int(rk['x']) + int(lk['x'])) // 2, (int(rk['y']) + int(lk['y'])) // 2 )
+                     cv2.putText(img_vis, f"IK: {ik_mm:.1f}mm", (mid_knees[0]-40, mid_knees[1]-15), font, 0.6, (255, 255, 255), 2)
+                
+                if ia_mm > 0:
+                     mid_ankles = ( (int(ra['x']) + int(la['x'])) // 2, (int(ra['y']) + int(la['y'])) // 2 )
+                     cv2.putText(img_vis, f"IA: {ia_mm:.1f}mm", (mid_ankles[0]-40, mid_ankles[1]+30), font, 0.6, (255, 255, 255), 2)
 
         # ============================================================
         # DRAW KEYPOINTS & LABELS (ALWAYS)
@@ -504,6 +559,24 @@ class ResultsScreen(ttk.Frame):
                         
                         cv2.putText(img_vis, lbl, (pt[0]+offset[0], pt[1]+offset[1]), font, 1.0, color, 3)
         
+        # ============================================================
+        # CROP TO PERSON BBOX (Phase 19)
+        # ============================================================
+        if person_bbox:
+            x1, y1, x2, y2 = person_bbox
+            h_img, w_img = img_vis.shape[:2]
+            
+            # Add padding (e.g. 50px)
+            padding = 50
+            x1 = max(0, x1 - padding)
+            y1 = max(0, y1 - padding)
+            x2 = min(w_img, x2 + padding)
+            y2 = min(h_img, y2 + padding)
+            
+            # Perform crop
+            img_vis = img_vis[y1:y2, x1:x2]
+            print(f"✂️ Cropped visualization to bbox: {x1},{y1},{x2},{y2}")
+
         print(f"🎨 Final image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
         print("=" * 60)
         
@@ -547,6 +620,29 @@ class ResultsScreen(ttk.Frame):
 
     def _back_to_upload(self):
         self.app.show_upload_screen(self.patient_data)
+
+    def _draw_height_diff(self, img, pt1, pt2, mm_per_px, value_mm=None, color=(255, 0, 0)):
+        if pt1[1] < pt2[1]: # pt1 is higher (smaller y)
+            high_pt, low_pt = pt1, pt2
+            side = -1 
+        else:
+            high_pt, low_pt = pt2, pt1
+            side = 1
+        
+        corner_pt = (low_pt[0], high_pt[1])
+        cv2.line(img, high_pt, corner_pt, color, 2, cv2.LINE_AA)
+        cv2.line(img, corner_pt, low_pt, color, 2, cv2.LINE_AA)
+        
+        if value_mm is None:
+            value_mm = abs(pt1[1] - pt2[1]) * mm_per_px
+            
+        label = f"Diff: {value_mm:.1f}mm"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        
+        lbl_x = low_pt[0] + (10 * side) - (tw if side == -1 else 0)
+        lbl_y = (low_pt[1] + corner_pt[1]) // 2
+        cv2.rectangle(img, (lbl_x-5, lbl_y-th-5), (lbl_x+tw+5, lbl_y+5), (255, 255, 255), -1)
+        cv2.putText(img, label, (lbl_x, lbl_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
 
 class DetailedReportWindow(tk.Toplevel):
@@ -630,11 +726,7 @@ class DetailedReportWindow(tk.Toplevel):
         btn_report.pack(side=tk.LEFT, padx=(0, 2))
         self.nav_buttons.append(btn_report)
 
-        btn_recommendations = tk.Button(self.tabs_container, text="RECOMMENDATIONS",
-                                       bg='#2D2D2D', fg='#AAAAAA', **btn_style,
-                                       command=lambda: self._switch_view('recommendations', btn_recommendations))
-        btn_recommendations.pack(side=tk.LEFT, padx=(0, 2))
-        self.nav_buttons.append(btn_recommendations)
+
 
         btn_table = tk.Button(self.tabs_container, text="DATA TABLE",
                              bg='#2D2D2D', fg='#AAAAAA', **btn_style,
@@ -670,8 +762,7 @@ class DetailedReportWindow(tk.Toplevel):
         self._update_nav_styles(active_btn)
         if view_name == 'report':
             self._show_report_view()
-        elif view_name == 'recommendations':
-            self._show_recommendations_view()
+
         elif view_name == 'table':
             self._show_table_view()
 
@@ -769,7 +860,15 @@ class DetailedReportWindow(tk.Toplevel):
 
         detections = self.analysis_data.get('detections', {})
         all_dets = detections.get('all_detections', [])
-        classification = all_dets[0].get('classification', 'Normal') if all_dets else 'Normal'
+        raw_class = all_dets[0].get('classification', 'Normal') if all_dets else 'Normal'
+        
+        # Normalize classification names
+        classification = raw_class
+        if 'Lordosis' in raw_class: classification = 'Lordosis'
+        elif 'Kyphosis' in raw_class: classification = 'Kyphosis'
+        elif 'Swayback' in raw_class: classification = 'Swayback'
+        elif 'Normal' in raw_class: classification = 'Normal'
+
         confidence = all_dets[0].get('confidence', 0) * 100 if all_dets else 0
 
         kp_dict = self.analysis_data.get('keypoints', {})
@@ -790,7 +889,7 @@ class DetailedReportWindow(tk.Toplevel):
         conf_color = '#00FF00' if confidence > 80 else '#FFA500' if confidence > 60 else '#FF0000'
         # Posture score removal requested
         # self._create_info_card(right_col, "POSTURE SCORE", f"{final_score:.1f}/100", score_color)
-        self._create_info_card(right_col, "CONFIDENCE LEVEL", f"{confidence:.1f}%", conf_color)
+        self._create_info_card(right_col, "Akurasi", f"{confidence:.1f}%", conf_color)
 
         # detailed measurements section (Merged from _populate_measurements_content)
         measurements_frame = tk.LabelFrame(parent, text=" BIOMECHANICAL ANALYSIS & METRICS ", 
@@ -843,31 +942,75 @@ class DetailedReportWindow(tk.Toplevel):
             
             tk.Frame(m_left, bg='#121212', height=20).pack() # Spacer
 
-            # Spine removed from report as requested
-            # tk.Label(m_left, text="SPINAL ALIGNMENT", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
-            # self._add_detail_row(m_left, "Lateral Deviation:", f"{spine_data.get('lateral_deviation_mm', 0):.2f} mm")
-            # self._add_detail_row(m_left, "Status:", spine_data.get('status', 'N/A'))
+            # Spine Analysis (Added)
+            m_spine_frame = tk.Frame(measurements_frame, bg='#121212')
+            m_spine_frame.grid(row=row_counter+1, column=0, sticky='nsew')
+            tk.Label(m_spine_frame, text="SPINE ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            self._add_detail_row(m_spine_frame, "Lateral Deviation:", f"{spine_data.get('lateral_deviation_mm', 0):.2f} mm")
+            self._add_detail_row(m_spine_frame, "Status:", spine_data.get('status', 'N/A'))
 
             # Right side: Hip/Pelvis
             m_right = tk.Frame(measurements_frame, bg='#121212')
-            m_right.grid(row=row_counter, column=1, sticky='nsew')
+            m_right.grid(row=row_counter, column=1, rowspan=2, sticky='nsew')
             
-            # Hip
-            tk.Label(m_right, text="HIP & PELVIS ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            # Pelvis Logic (C vs D)
+            tk.Label(m_right, text="PELVIS ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
             self._add_detail_row(m_right, "Height Diff:", f"{hip_data.get('height_difference_mm', 0):.2f} mm")
             self._add_detail_row(m_right, "Width (C-D):", f"{hip_data.get('width_mm', 0):.2f} mm")
-            self._add_detail_row(m_right, "Status:", hip_data.get('status', 'N/A'))
+            
+            # Determine C vs D Status
+            kp = self.analysis_data.get('keypoints', {})
+            rc, ld = kp.get('right_hip'), kp.get('left_hip') # C and D
+            pelvis_status_desc = hip_data.get('status', 'N/A')
+            if rc and ld:
+                if rc['y'] < ld['y']: # Lower y is higher in image
+                    pelvis_status_desc = "C (Right) higher than D (Left)"
+                elif ld['y'] < rc['y']:
+                    pelvis_status_desc = "D (Left) higher than C (Right)"
+                else:
+                    pelvis_status_desc = "Symmetrical"
+            self._add_detail_row(m_right, "Status:", pelvis_status_desc)
+
+            tk.Frame(m_right, bg='#121212', height=20).pack() # Spacer
+
+            # Leg High Difference
+            tk.Label(m_right, text="LEG ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            leg_ant = self.analysis_data.get('leg_anterior', {})
+            mm_px = self.analysis_data.get('conversion_ratio', 0.25)
+            
+            rk, lk = kp.get('right_knee'), kp.get('left_knee') # E and F
+            ra, la = kp.get('right_ankle'), kp.get('left_ankle') # G and H
+            
+            # E vs F (Knees)
+            if rk and lk:
+                k_diff = abs(rk['y'] - lk['y']) * mm_px
+                # self._add_detail_row(m_right, "Knee Height Diff:", f"{k_diff:.2f} mm")
+                if rk['y'] < lk['y']:
+                   ef_status = "E (Right) higher than F (Left)"
+                elif lk['y'] < rk['y']:
+                   ef_status = "F (Left) higher than E (Right)"
+                else:
+                   ef_status = "Symmetrical"
+                self._add_detail_row(m_right, "Knee Status (E-F):", ef_status)
+
+            # G vs H (Ankles)    
+            if ra and la:
+                a_diff = abs(ra['y'] - la['y']) * mm_px
+                # self._add_detail_row(m_right, "Ankle Height Diff:", f"{a_diff:.2f} mm")
+                if ra['y'] < la['y']:
+                   gh_status = "G (Right) higher than H (Left)"
+                elif la['y'] < ra['y']:
+                   gh_status = "H (Left) higher than G (Right)"
+                else:
+                   gh_status = "Symmetrical"
+                self._add_detail_row(m_right, "Ankle Status (G-H):", gh_status)
 
         else:
             # Lateral view measurements
-            head_data = self.analysis_data.get('head', {})
-            m_frame = tk.Frame(measurements_frame, bg='#121212')
-            m_frame.grid(row=row_counter, column=0, columnspan=2, sticky='nsew')
-
-            tk.Label(m_frame, text="LATERAL ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
             lat_dists = self.analysis_data.get('lateral_distances', {})
             keypoints = self.analysis_data.get('keypoints', {})
             mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+            leg_lat = self.analysis_data.get('leg_lateral', {})
 
             def get_lat_dist(key, p1_name, p2_name):
                 val = lat_dists.get(key, 0)
@@ -879,21 +1022,187 @@ class DetailedReportWindow(tk.Toplevel):
                         val = dist_px * mm_per_px
                 return val
 
+            head_data = self.analysis_data.get('head', {})
+            m_frame = tk.Frame(measurements_frame, bg='#121212')
+            m_frame.grid(row=row_counter, column=0, columnspan=2, sticky='nsew')
+
+            # HEAD ANALYSIS
+            tk.Label(m_frame, text="HEAD ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
             m_head = get_lat_dist('head_shift_mm', 'ear', 'shoulder')
             if m_head == 0: m_head = get_lat_dist('ear_to_shoulder_mm', 'ear', 'shoulder')
+            self._add_detail_row(m_frame, "Shift (A-B):", f"{m_head:.2f} mm")
             
-            m_spine = get_lat_dist('spine_shift_mm', 'shoulder', 'pelvic_center')
-            if m_spine == 0: m_spine = get_lat_dist('shoulder_to_pelvic_mm', 'shoulder', 'pelvic_center')
+            # Head Status: A forward of B?
+            ka = keypoints.get('lateral_ear')
+            kb = keypoints.get('lateral_shoulder')
+            head_status = head_data.get('status', 'N/A')
+            if ka and kb:
+                if 'right' in self.view_type.lower(): # Facing Right -> x increases forward
+                    if ka['x'] > kb['x']: head_status = "A (Ear) forward of B"
+                    else: head_status = "A (Ear) backward of B"
+                else: # Facing Left (default lateral usually) -> x decreases forward ?? 
+                      # Usually lateral view standard: Left side view (facing left). 
+                      # If facing left, Front is smaller X? Or is it Right side view facing Right?
+                      # Let's assume standard "Forward" logic based on typical keypoint detection output.
+                      # Ideally we should know orientation.
+                      # Let's use the absolute difference description logic requested.
+                      diff_x = ka['x'] - kb['x']
+                      if abs(diff_x) < 5: head_status = "Aligned"
+                      elif diff_x < 0: head_status = "A forward of B" if 'left' in self.view_type.lower() else "A backward of B"
+                      else: head_status = "A backward of B" if 'left' in self.view_type.lower() else "A forward of B"
             
-            m_pelvic = get_lat_dist('pelvic_shift_mm', 'pelvic_back', 'pelvic_front')
-            if m_pelvic == 0: m_pelvic = get_lat_dist('pelvic_width_mm', 'pelvic_back', 'pelvic_front')
+            # Simplified explicit request: "Tolong tambah keterangan ... Titik A lebih condong kedepan dari pada B"
+            if head_data.get('shift_mm', 0) > 5:
+                 head_status = "Titik A lebih condong ke depan dari B"
+            elif head_data.get('shift_mm', 0) < -5:
+                 head_status = "Titik A lebih condong ke belakang dari B"
+            else:
+                 head_status = "Terlinier / Aligned"
+            # Status removal requested
+            # self._add_detail_row(m_frame, "Status:", head_status)
 
-            self._add_detail_row(m_frame, "Head Shift (A-B):", f"{m_head:.2f} mm")
-            self._add_detail_row(m_frame, "Spine Shift (B-E):", f"{m_spine:.2f} mm")
-            self._add_detail_row(m_frame, "Pelvic Shift (C-D):", f"{m_pelvic:.2f} mm")
-            # Head alignment (Tilt/Shift) preserved or optional?
-            # self._add_detail_row(m_frame, "Forward Shift:", f"{head_data.get('shift_mm', 0):.2f} mm")
-            # self._add_detail_row(m_frame, "Status:", head_data.get('status', 'N/A'))
+
+            tk.Frame(m_frame, bg='#121212', height=10).pack()
+
+            # SPINE ANALYSIS
+            tk.Label(m_frame, text="SPINE ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            m_spine = get_lat_dist('spine_shift_mm', 'shoulder', 'pelvic_center')
+            self._add_detail_row(m_frame, "Shift (B-E):", f"{m_spine:.2f} mm")
+            
+            # Spine Status: B vs E
+            kb = keypoints.get('lateral_shoulder')
+            ke = keypoints.get('lateral_pelvic_center')
+            spine_status_desc = "N/A"
+            
+            # Checking logic: Left view (facing left) -> nose at x=0. Back at x=W.
+            # So smaller X is forward.
+            # Right view (facing right) -> nose at x=W. Back at x=0.
+            # So larger X is forward.
+            is_facing_right = 'right' in self.view_type.lower()
+            
+            if kb and ke:
+                dx = kb['x'] - ke['x']
+                if abs(dx) < 5:
+                    spine_status_desc = "Terlinier / Aligned"
+                elif is_facing_right:
+                    spine_status_desc = "Titik B condong ke depan dari E" if dx > 0 else "Titik B condong ke belakang dari E"
+                else: # Facing Left (Small X is forward)
+                    spine_status_desc = "Titik B condong ke depan dari E" if dx < 0 else "Titik B condong ke belakang dari E"
+
+            # self._add_detail_row(m_frame, "Status:", spine_status_desc)
+
+            tk.Frame(m_frame, bg='#121212', height=10).pack()
+
+            # PELVIS ANALYSIS
+            tk.Label(m_frame, text="PELVIS ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            m_pelvic = get_lat_dist('pelvic_shift_mm', 'pelvic_back', 'pelvic_front') # C-D width
+            
+            kc = keypoints.get('lateral_pelvic_back') # C
+            kd = keypoints.get('lateral_pelvic_front') # D
+            
+            pelvic_height_diff = 0
+            if kc and kd:
+                pelvic_height_diff = abs(kc['y'] - kd['y']) * mm_per_px
+            
+            self._add_detail_row(m_frame, "Height Diff (C-D):", f"{pelvic_height_diff:.2f} mm")
+            
+            # Status: C higher than D
+            p_status = "N/A"
+            if kc and kd:
+                if abs(kc['y'] - kd['y']) < 5: p_status = "Level / Sejajar"
+                elif kc['y'] < kd['y']: p_status = "Titik C (Belakang) lebih tinggi dari D"
+                else: p_status = "Titik D (Depan) lebih tinggi dari C"
+            # self._add_detail_row(m_frame, "Status:", p_status)
+
+
+            tk.Frame(m_frame, bg='#121212', height=10).pack()
+
+            # LEG ANALYSIS
+            tk.Label(m_frame, text="LEG ANALYSIS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            
+            ke = keypoints.get('lateral_pelvic_center') # E (renamed locally for logic, but in map it's E) - Wait, map says E is pelvic_center
+            kf = keypoints.get('lateral_knee') # F
+            kg = keypoints.get('lateral_ankle') # G
+            
+            # E-F (Thigh) Status
+            ef_status = "N/A"
+            if ke and kf:
+                dx = ke['x'] - kf['x']
+                if abs(dx) < 5: ef_status = "Vertical / Tegak"
+                elif is_facing_right:
+                    ef_status = "Titik E condong ke depan dari F" if dx > 0 else "Titik E condong ke belakang dari F"
+                else: 
+                    ef_status = "Titik E condong ke depan dari F" if dx < 0 else "Titik E condong ke belakang dari F"
+            
+            # F-G (Shin) Status
+            fg_status = "N/A"
+            if kf and kg:
+                dx = kf['x'] - kg['x']
+                if abs(dx) < 5: fg_status = "Vertical / Tegak"
+                elif is_facing_right:
+                    fg_status = "Titik F condong ke depan dari G" if dx > 0 else "Titik F condong ke belakang dari G"
+                else:
+                    fg_status = "Titik F condong ke depan dari G" if dx < 0 else "Titik F condong ke belakang dari G"
+
+            # self._add_detail_row(m_frame, "Thigh (E-F):", ef_status)
+            # self._add_detail_row(m_frame, "Shin (F-G):", fg_status)
+            self._add_detail_row(m_frame, "Overall Angle:", f"{leg_lat.get('leg_angle', 0):.1f}°")
+
+            tk.Frame(m_frame, bg='#121212', height=20).pack()
+
+            # --- KEYPOINT STATUS ---
+            tk.Label(m_frame, text="KEYPOINT STATUS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
+            
+            # Logic for comparisons
+            # A > B means X coordinate of A is greater than B
+            # C Higher than D means Y coordinate of C is smaller than D (image coordinates)
+            
+            statuses = []
+            
+            def check_x(k1_name, l1, k2_name, l2):
+                k1 = keypoints.get(k1_name)
+                k2 = keypoints.get(k2_name)
+                if k1 and k2:
+                    if k1['x'] > k2['x']: return f"{l1} > {l2}"
+                    elif k1['x'] < k2['x']: return f"{l1} < {l2}"
+                    else: return f"{l1} = {l2}"
+                return None
+
+            def check_y_height(k1_name, l1, k2_name, l2):
+                k1 = keypoints.get(k1_name)
+                k2 = keypoints.get(k2_name)
+                if k1 and k2:
+                    if k1['y'] < k2['y']: return f"{l1} Higher than {l2}"
+                    elif k2['y'] < k1['y']: return f"{l2} Higher than {l1}"
+                    else: return f"{l1} same height as {l2}"
+                return None
+
+            # 1) A vs B (Ear vs Shoulder)
+            s_ab = check_x('lateral_ear', 'A', 'lateral_shoulder', 'B')
+            if s_ab: statuses.append(s_ab)
+
+            # 2) B vs E (Shoulder vs Pelvic Center)
+            s_be = check_x('lateral_shoulder', 'B', 'lateral_pelvic_center', 'E')
+            if s_be: statuses.append(s_be)
+            
+            # 3) E vs F (Pelvic Center vs Knee)
+            s_ef = check_x('lateral_pelvic_center', 'E', 'lateral_knee', 'F')
+            if s_ef: statuses.append(s_ef)
+
+            # 4) F vs G (Knee vs Ankle)
+            s_fg = check_x('lateral_knee', 'F', 'lateral_ankle', 'G')
+            if s_fg: statuses.append(s_fg)
+
+            # 5) C vs D (Pelvic Back vs Pelvic Front) - Height
+            s_cd = check_y_height('lateral_pelvic_back', 'C', 'lateral_pelvic_front', 'D')
+            if s_cd: statuses.append(s_cd)
+
+            full_status = ", ".join(statuses)
+            
+            status_text = f"{full_status}"
+            
+            tk.Label(m_frame, text=status_text, font=('Segoe UI', 10, 'bold'), 
+                     bg='#121212', fg='white', justify='left', wraplength=500).pack(anchor='w', padx=30, pady=5)
 
     def _add_detail_row(self, parent, label, value):
         f = tk.Frame(parent, bg='#121212')
@@ -918,58 +1227,7 @@ class DetailedReportWindow(tk.Toplevel):
         tk.Label(content_frame, text=content, font=('Segoe UI', 14, 'bold'),
                 bg='#1E1E1E', fg='white').pack(anchor='w', pady=(2,0))
 
-    def _show_recommendations_view(self):
-        for widget in self.content_container.winfo_children():
-            widget.destroy()
 
-        txt_area = tk.Text(self.content_container, bg='#1E1E1E', fg='#FFD700',
-                          font=('Arial', 11), padx=20, pady=20, wrap=tk.WORD)
-        txt_area.pack(fill=tk.BOTH, expand=True)
-
-        self._populate_recommendations_content(txt_area)
-        txt_area.config(state=tk.DISABLED)
-
-    def _populate_recommendations_content(self, txt_area):
-        detections = self.analysis_data.get('detections', {})
-        all_dets = detections.get('all_detections', [])
-        classification = all_dets[0].get('classification', 'Normal') if all_dets else 'Normal'
-
-        if self._is_frontal():
-            analysis_type = "anterior_posterior_analysis"
-        else:
-            analysis_type = "right_left_analysis"
-
-        recommendations = self._generate_recommendations(analysis_type, classification)
-
-        content = "💡 RECOMMENDATIONS BASED ON ANALYSIS\n"
-        content += "=" * 60 + "\n\n"
-
-        for i, rec in enumerate(recommendations, 1):
-            content += f"{i}. {rec}\n\n"
-
-        txt_area.insert(tk.END, content)
-
-    def _generate_recommendations(self, analysis_type, classification):
-        recommendations = []
-
-        if "Kyphosis" in classification:
-            recommendations.append("Chest muscle stretching and upper back muscle strengthening exercises")
-            recommendations.append("Improve sitting posture and avoid hunching")
-            recommendations.append("Consult with a physiotherapist for corrective therapy")
-        elif "Lordosis" in classification:
-            recommendations.append("Core muscle and abdominal muscle strengthening exercises")
-            recommendations.append("Hip flexor and lower back stretching")
-            recommendations.append("Avoid wearing high heels for extended periods")
-        elif "Swayback" in classification:
-            recommendations.append("Exercises to strengthen gluteus and hamstring muscles")
-            recommendations.append("Improve standing posture with even weight distribution")
-            recommendations.append("Consult with a postural specialist for further correction")
-        else:
-            recommendations.append("Maintain good posture with regular physical activity")
-            recommendations.append("Perform regular stretching and muscle strengthening")
-            recommendations.append("Monitor posture periodically for prevention")
-
-        return recommendations
 
     def _populate_table(self):
         if not hasattr(self, 'tree'):
@@ -981,21 +1239,51 @@ class DetailedReportWindow(tk.Toplevel):
         rows = []
         if self._is_frontal():
             sh_data = self.analysis_data.get('shoulder', {})
+            kp = self.analysis_data.get('keypoints', {})
+            
             if sh_data:
                 rows.append(('Shoulder', 'Height Difference', f"{sh_data.get('shoulder_height_diff_mm', sh_data.get('height_difference_mm', 0)):.2f}", 'mm', sh_data.get('status', '-')))
                 rows.append(('Shoulder', 'Width (A-B)', f"{sh_data.get('width_mm', 0):.2f}", 'mm', '-'))
-                # Slope angle removed as requested
-                # rows.append(('Shoulder', 'Slope Angle', f"{sh_data.get('slope_angle_deg', 0):.2f}", 'deg', '-', '-'))
 
             hip_data = self.analysis_data.get('hip', {})
             if hip_data:
-                rows.append(('Hip/Pelvis', 'Height Difference', f"{hip_data.get('hip_height_diff_mm', hip_data.get('height_difference_mm', 0)):.2f}", 'mm', hip_data.get('status', '-')))
-                rows.append(('Hip/Pelvis', 'Width (C-D)', f"{hip_data.get('width_mm', 0):.2f}", 'mm', '-'))
-                # Pelvic Tilt removed as requested
-                # rows.append(('Hip/Pelvis', 'Pelvic Tilt', f"{hip_data.get('pelvic_tilt_angle', 0):.2f}", 'deg', '-', '-'))
+                h_diff = hip_data.get('hip_height_diff_mm', hip_data.get('height_difference_mm', 0))
+                
+                # C vs D Status
+                rc, ld = kp.get('right_hip'), kp.get('left_hip')
+                p_status = hip_data.get('status', '-')
+                if rc and ld:
+                    if abs(rc['y'] - ld['y']) < 5: p_status = "Symmetrical"
+                    elif rc['y'] < ld['y']: p_status = "C (Right) Higher"
+                    else: p_status = "D (Left) Higher"
+                
+                rows.append(('Pelvis', 'Height Difference', f"{h_diff:.2f}", 'mm', p_status))
+                rows.append(('Pelvis', 'Width (C-D)', f"{hip_data.get('width_mm', 0):.2f}", 'mm', '-'))
 
-            # Spine removed as requested
-            # spine_data = self.analysis_data.get('spinal', {})
+            # Spine (Added to table)
+            spine_data = self.analysis_data.get('spinal', {})
+            if spine_data:
+                 rows.append(('Spine', 'Lateral Deviation', f"{spine_data.get('lateral_deviation_mm', 0):.2f}", 'mm', spine_data.get('status', '-')))
+
+            # Leg High Difference
+            leg_ant = self.analysis_data.get('leg_anterior', {})
+            mm_px = self.analysis_data.get('conversion_ratio', 0.25)
+            
+            rk, lk = kp.get('right_knee'), kp.get('left_knee')
+            if rk and lk:
+                k_diff = abs(rk['y'] - lk['y']) * mm_px
+                k_status = "Symmetrical"
+                if k_diff >= 5:
+                    k_status = "E (Right) Higher" if rk['y'] < lk['y'] else "F (Left) Higher"
+                rows.append(('Legs', 'Knee Height Diff', f"{k_diff:.2f}", 'mm', k_status))
+            
+            ra, la = kp.get('right_ankle'), kp.get('left_ankle')
+            if ra and la:
+                a_diff = abs(ra['y'] - la['y']) * mm_px
+                a_status = "Symmetrical"
+                if a_diff >= 5:
+                    a_status = "G (Right) Higher" if ra['y'] < la['y'] else "H (Left) Higher"
+                rows.append(('Legs', 'Ankle Height Diff', f"{a_diff:.2f}", 'mm', a_status))
 
         elif self._is_lateral() or 'kiri' in str(self.view_type).lower() or 'kanan' in str(self.view_type).lower():
             lat_dists = self.analysis_data.get('lateral_distances', {})
@@ -1021,24 +1309,41 @@ class DetailedReportWindow(tk.Toplevel):
             m_pelvic = get_lat_dist('pelvic_shift_mm', 'pelvic_back', 'pelvic_front')
             if m_pelvic == 0: m_pelvic = get_lat_dist('pelvic_width_mm', 'pelvic_back', 'pelvic_front')
 
-            if m_head > 0 or m_spine > 0 or m_pelvic > 0:
-                rows.append(('Lateral', 'Head Shift (A-B)', f"{m_head:.2f}", 'mm', 'Measured'))
-                rows.append(('Lateral', 'Spine Shift (B-E)', f"{m_spine:.2f}", 'mm', 'Measured'))
-                rows.append(('Lateral', 'Pelvic Shift (C-D)', f"{m_pelvic:.2f}", 'mm', 'Measured'))
-            else:
-                # Fallback if no distances, use head data
-                head_data = self.analysis_data.get('head', {})
-                if head_data:
-                    rows.append(('Head', 'Forward Shift', f"{head_data.get('shift_mm', 0):.2f}", 'mm', head_data.get('status', '-')))
+            # Status Determination
+            is_facing_right = 'right' in self.view_type.lower()
+            
+            # HEAD Status
+            rows.append(('Lateral', 'Head Shift (A-B)', f"{m_head:.2f}", 'mm', '-'))
 
-            # Lumbar removed as requested
-            # angles = self.analysis_data.get('postural_angles', {})
-            # if angles.get('lordosis_angle'): ...
+            # SPINE Status
+            rows.append(('Lateral', 'Spine Shift (B-E)', f"{m_spine:.2f}", 'mm', '-'))
+
+            # PELVIS Status
+            kc = keypoints.get('lateral_pelvic_back')
+            kd = keypoints.get('lateral_pelvic_front')
+            pelvic_h_diff = 0
+            if kc and kd:
+                pelvic_h_diff = abs(kc['y']-kd['y'])*mm_per_px
+                
+            rows.append(('Lateral', 'Pelvic Height Diff (C-D)', f"{pelvic_h_diff:.2f}", 'mm', '-'))
+
+            # LEG Status
+            ke, kf, kg = keypoints.get('lateral_pelvic_center'), keypoints.get('lateral_knee'), keypoints.get('lateral_ankle')
+            
+            # E-F
+            if ke and kf:
+                 dx = ke['x'] - kf['x']
+                 rows.append(('Leg', 'Thigh (E-F) Shift', f"{abs(dx)*mm_per_px:.1f}", 'mm', '-'))
+
+            # F-G
+            if kf and kg:
+                 dx = kf['x'] - kg['x']
+                 rows.append(('Leg', 'Shin (F-G) Shift', f"{abs(dx)*mm_per_px:.1f}", 'mm', '-'))
 
         for row in rows:
             tags = ()
             status_text = str(row[4]).lower()
-            if 'unbalanced' in status_text or 'poor' in status_text or 'critical' in status_text:
+            if 'unbalanced' in status_text or 'poor' in status_text or 'critical' in status_text or 'forward' in status_text:
                 tags = ('warning',)
             self.tree.insert('', tk.END, values=row, tags=tags)
 
@@ -1083,6 +1388,7 @@ class DetailedReportWindow(tk.Toplevel):
         main_frame = tk.Frame(graph_window, bg='#1E1E1E')
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
+        # Left Side: Annotated Image
         image_frame = tk.LabelFrame(main_frame,
                                     text=" ANNOTATED IMAGE ",
                                     bg='#1E1E1E', fg='white',
@@ -1102,85 +1408,293 @@ class DetailedReportWindow(tk.Toplevel):
             img_label.image = tk_img
             img_label.pack(pady=10, padx=10)
 
-        graph_frame = tk.Frame(main_frame, bg='#1E1E1E')
-        graph_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        # Right Side: Graphs (Scrollable 2D)
+        graph_container = tk.Frame(main_frame, bg='#1E1E1E')
+        graph_container.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        # Canvas & Scrollbars
+        canvas = tk.Canvas(graph_container, bg='#1E1E1E', highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(graph_container, orient="vertical", command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(graph_container, orient="horizontal", command=canvas.xview)
+        
+        scrollable_graph_frame = tk.Frame(canvas, bg='#1E1E1E')
+        
+        scrollable_graph_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_graph_frame, anchor="nw")
+        
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        # Grid layout for scrollbars
+        canvas.grid(row=0, column=0, sticky="nsew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        graph_container.columnconfigure(0, weight=1)
+        graph_container.rowconfigure(0, weight=1)
+
+        # Enable Mousewheel Scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            
+        def _on_shift_mousewheel(event):
+            canvas.xview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        canvas.bind_all("<Shift-MouseWheel>", _on_shift_mousewheel)
+        graph_window.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>")) # Cleanup
 
         if self._is_lateral():
-            self._create_lateral_graphs(graph_frame)
+            self._create_lateral_graphs(scrollable_graph_frame)
         else:
-            self._create_frontal_graphs(graph_frame)
+            self._create_frontal_graphs(scrollable_graph_frame)
 
     def _create_lateral_graphs(self, parent_frame):
+        # Data
         head_data = self.analysis_data.get('head', {})
         head_shift = head_data.get('shift_mm', 0)
-        head_tilt = head_data.get('tilt_angle', 0)
-
-        fig = plt.figure(figsize=(6, 10), facecolor='#1E1E1E')
+        
+        # Increased width to 10 inches for wider X-axis visualization
+        # Increased height to 25 inches (approx 6 inches per plot) to lengthen Y-axis
+        fig = plt.figure(figsize=(10, 25), facecolor='#1E1E1E')
         self.graph_figures.append(fig)
 
-        ax1 = fig.add_subplot(211, facecolor='white')
-        ax1.set_xlim(0, 10)
+        def set_dynamic_xlim(ax, x_values, center=5, min_width=5):
+            # Calculate max deviation from center
+            max_dev = 0
+            if x_values:
+                max_dev = max([abs(x - center) for x in x_values])
+            
+            # Ensure minimum width
+            limit = max(min_width, max_dev + 1)
+            ax.set_xlim(center - limit, center + limit)
+
+        # Pre-calculate accurate distances for annotations (Matching image analysis)
+        lat_dists = self.analysis_data.get('lateral_distances', {})
+        keypoints = self.analysis_data.get('keypoints', {})
+        mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+        
+        def get_dist(key, p1_name, p2_name):
+             val = lat_dists.get(key, 0)
+             if val == 0:
+                 k1 = keypoints.get(f'lateral_{p1_name}')
+                 k2 = keypoints.get(f'lateral_{p2_name}')
+                 if k1 and k2:
+                     val = np.sqrt((k1['x']-k2['x'])**2 + (k1['y']-k2['y'])**2) * mm_per_px
+             return val
+
+        m_ear_sh = get_dist('ear_to_shoulder_mm', 'ear', 'shoulder')
+        m_sh_pel = get_dist('shoulder_to_pelvic_mm', 'shoulder', 'pelvic_center')
+        m_pel_wd = get_dist('pelvic_width_mm', 'pelvic_back', 'pelvic_front')
+        
+        ke = keypoints.get('lateral_pelvic_center')
+        kf = keypoints.get('lateral_knee')
+        kg = keypoints.get('lateral_ankle')
+        
+        m_thigh = 0
+        if ke and kf:
+             m_thigh = np.sqrt((ke['x']-kf['x'])**2 + (ke['y']-kf['y'])**2) * mm_per_px
+             
+        m_shin = 0
+        if kf and kg:
+             m_shin = np.sqrt((kf['x']-kg['x'])**2 + (kf['y']-kg['y'])**2) * mm_per_px
+
+        # 1. HEAD A-B VERTICAL
+        ax1 = fig.add_subplot(411, facecolor='white')
         ax1.set_ylim(0, 10)
         ax1.grid(True, alpha=0.3)
+        ax1.plot([5, 5], [2, 8], 'k--', linewidth=2, label='Vertical') 
+        
+        # Logic: A > B (A forward of B)
+        # We plot deviations from center (5,5)
+        # Using real data if available
+        ka = self.analysis_data.get('keypoints', {}).get('lateral_ear')
+        kb = self.analysis_data.get('keypoints', {}).get('lateral_shoulder')
+        mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+        
+        a_x = 5
+        b_x = 5
+        if ka and kb:
+            # Shift in mm
+            shift_mm = (ka['x'] - kb['x']) * mm_per_px
+            # Scale for graph: 1 unit = 60mm (Reduced sensitivity for realistic view)
+            scale = 1.0 / 60.0
+            
+            is_facing_right = 'right' in self.view_type.lower() or 'kanan' in self.view_type.lower()
+            
+            # Graph automatically follows image direction
+            a_x = 5 + (shift_mm * scale)
+        
+        ax1.plot([a_x, b_x], [7, 4], 'g-', linewidth=2, label='Alignment') # Green line A-B
+        ax1.plot(a_x, 7, 'bo', markersize=10, label='A (Ear)')
+        ax1.plot(b_x, 4, 'ro', markersize=10, label='B (Shoulder)')
+        ax1.text(a_x + 0.2, 7, 'A', fontsize=12, fontweight='bold')
+        ax1.text(b_x + 0.2, 4, 'B', fontsize=12, fontweight='bold')
+        
+        # Add Distance Text (Green)
+        mid_x_ab = (a_x + b_x) / 2
+        mid_y_ab = (7 + 4) / 2
+        ax1.text(mid_x_ab, mid_y_ab, f"{m_ear_sh:.1f}mm", 
+                color='#00FF00', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='black', edgecolor='none', alpha=0.7))
+        
+        set_dynamic_xlim(ax1, [a_x, b_x])
+        ax1.set_title('Head', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax1.legend(loc='upper right')
 
-        ax1.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Reference')
 
-        shift_x = 6 + (head_shift / 10)
-        ax1.plot([shift_x, shift_x], [3, 7], 'r-', linewidth=4, label=f'Head Shift: {head_shift:.1f}mm')
-
-        ax1.set_title('HEAD SHIFT ANALYSIS', fontsize=12, fontweight='bold', pad=10)
-        ax1.text(5, 8.5, f'Head Shift: {head_shift:.1f}mm',
-                ha='center', fontsize=11, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        ax1.legend(loc='lower right', fontsize=9)
-        ax1.set_xticks(range(0, 11, 2))
-        ax1.set_yticks(range(0, 11, 2))
-
-        ax2 = fig.add_subplot(212, facecolor='white')
-        ax2.set_xlim(0, 10)
+        # 2. SPINE B-E VERTICAL
+        ax2 = fig.add_subplot(412, facecolor='white')
         ax2.set_ylim(0, 10)
         ax2.grid(True, alpha=0.3)
+        ax2.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Vertical')
+        
+        ke = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_center')
+        
+        b_x = 5
+        e_x = 5
+        if kb and ke:
+            shift_mm = (kb['x'] - ke['x']) * mm_per_px
+            scale = 1.0 / 60.0
+            # Graph follows image direction
+            b_x = 5 + (shift_mm * scale)
+        
+        ax2.plot(b_x, 8, 'ro', markersize=10, label='B (Shoulder)')
+        ax2.plot(e_x, 3, 'go', markersize=10, label='E (Pelvic)')
+        ax2.plot([b_x, e_x], [8, 3], 'c-', linewidth=2, label='Alignment') # Cyan line B-E
+        ax2.text(b_x + 0.2, 8, 'B', fontsize=12, fontweight='bold')
+        ax2.text(e_x + 0.2, 3, 'E', fontsize=12, fontweight='bold')
+        
+        # Add Distance Text (Cyan)
+        mid_x_be = (b_x + e_x) / 2
+        mid_y_be = (8 + 3) / 2
+        ax2.text(mid_x_be, mid_y_be, f"{m_sh_pel:.1f}mm", 
+                color='cyan', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='black', edgecolor='none', alpha=0.7))
+        
+        set_dynamic_xlim(ax2, [b_x, e_x])
+        ax2.set_title('Spine', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax2.legend(loc='upper right')
 
-        ax2.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Horizontal')
 
-        tilt_rad = np.radians(head_tilt)
-        x_end = 8
-        y_end = 5 + (x_end - 4) * np.tan(tilt_rad)
-        ax2.plot([4, x_end], [5, y_end], 'b-', linewidth=4, label=f'Tilt: {head_tilt:.1f}°')
+        # 3. PELVIS C-D HORIZONTAL
+        ax3 = fig.add_subplot(413, facecolor='white')
+        ax3.set_ylim(0, 10) # Will be dynamic
+        ax3.grid(True, alpha=0.3)
+        ax3.plot([2, 8], [5, 5], 'k--', linewidth=2, label='Horizontal')
+        
+        kc = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_back')
+        kd = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_front')
+        
+        y_c = 5
+        y_d = 5
+        
+        if kc and kd:
+            h_diff_mm = (kc['y'] - kd['y']) * mm_per_px
+            # Scale: 1 unit = 10mm height diff
+            scale_y = 1.0 / 10.0
+            
+            # C is Back, D is Front.
+            # If C is Higher (smaller y), h_diff is negative.
+            # In graph, higher Y is up. So we subtract h_diff (because image Y is down) -> Wait.
+            # Image Y: 0 is top. 100 is bottom.
+            # kc['y'] < kd['y'] -> C is physically higher in image.
+            # Graph Y: 0 is bottom, 10 is top.
+            # We want C to depend on this comparison.
+            # Let's fix D at 5.
+            
+            diff_graph = (kd['y'] - kc['y']) * mm_per_px * scale_y # Positive if C is higher (smaller px y)
+            y_c = 5 + diff_graph
+            
+        # Standardize X positions (Back Left, Front Right or vice versa depending on facing?)
+        # Guide says "Pelvis C-D horizontal".
+        # Let's put C (Back) on Left(3) and D (Front) on Right(7) consistently for specific graph reading?
+        # Or match facing? Let's match facing for intuition.
+        cx, dx = (3, 7) if is_facing_right else (7, 3) 
 
-        ax2.set_title('HEAD TILT ANALYSIS', fontsize=12, fontweight='bold', pad=10)
-        ax2.text(5, 8.5, f'Head Tilt: {head_tilt:.1f}°',
-                ha='center', fontsize=11, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-        ax2.legend(loc='lower right', fontsize=9)
-        ax2.set_xticks(range(0, 11, 2))
-        ax2.set_yticks(range(0, 11, 2))
+        ax3.plot(cx, y_c, 'bo', markersize=10, label='C (Back)')
+        ax3.plot(dx, y_d, 'bo', markersize=10, label='D (Front)')
+        ax3.plot([cx, dx], [y_c, y_d], 'b-', linewidth=3, label='Pelvic Line')
+        ax3.text(cx, y_c + 0.5, 'C', fontsize=12, fontweight='bold')
+        ax3.text(dx, y_d + 0.5, 'D', fontsize=12, fontweight='bold')
+        
+        # Add Distance Text (White/Blue)
+        mid_x_cd = (cx + dx) / 2
+        mid_y_cd = (y_c + y_d) / 2
+        ax3.text(mid_x_cd, mid_y_cd, f"{m_pel_wd:.1f}mm", 
+                color='white', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='blue', edgecolor='none', alpha=0.7))
+        
+        # Dynamic Y limits
+        min_y, max_y = min(y_c, y_d), max(y_c, y_d)
+        ax3.set_ylim(min_y - 2, max_y + 2)
+        ax3.set_xlim(0, 10)
+        ax3.set_title('Pelvis', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax3.legend(loc='upper right')
 
-        summary_text = f"OVERALL SUMMARY\n\n"
-        summary_text += f"📊 ANALYSIS SUMMARY\n\n"
-        summary_text += f"LATERAL ANALYSIS:\n"
-        summary_text += f"  Head Shift: {head_shift:.1f}mm\n"
-        summary_text += f"  Head Tilt: {head_tilt:.1f}°\n"
-        summary_text += f"  Status: {head_data.get('status', 'N/A')}\n"
 
-        score_data = self.analysis_data.get('posture_score', {})
-        final_score = score_data.get('adjusted_score', 0)
-        summary_text += f"\n⚖️ OVERALL SCORE:\n"
-        summary_text += f"  {final_score:.1f}/100\n"
+        # 4. LEG E-F-G VERTICAL
+        ax4 = fig.add_subplot(414, facecolor='white')
+        ax4.set_ylim(0, 10)
+        ax4.grid(True, alpha=0.3)
+        ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Plumb')
+        
+        kf = self.analysis_data.get('keypoints', {}).get('lateral_knee')
+        kg = self.analysis_data.get('keypoints', {}).get('lateral_ankle')
+        
+        e_x = 5
+        f_x = 5
+        g_x = 5
+        
+        if ke and kf and kg:
+             # Calculate shifts relative to E (Hip/Pelvic Center)
+             # e_x is reference (0 deviation)
+             
+             scale = 1.0 / 60.0 # 1 unit = 60mm
+             
+             dx_ef = (kf['x'] - ke['x']) * mm_per_px
+             dx_eg = (kg['x'] - ke['x']) * mm_per_px
+             
 
-        if final_score < 30:
-            summary_text += "  (Critical)"
-        elif final_score < 60:
-            summary_text += "  (Needs Attention)"
-        else:
-            summary_text += "  (Good)"
+                 
+             f_x = 5 + (dx_ef * scale)
+             g_x = 5 + (dx_eg * scale)
 
-        fig.text(0.98, 0.02, summary_text,
-                ha='right', va='bottom', fontsize=9,
-                family='monospace',
-                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9))
+        ax4.plot(e_x, 9, 'yo', markersize=10, label='E (Hip)')
+        ax4.plot(f_x, 5, 'yo', markersize=10, label='F (Knee)')
+        ax4.plot(g_x, 1, 'yo', markersize=10, label='G (Ankle)')
+        
+        # E-F Line (Yellow)
+        ax4.plot([e_x, f_x], [9, 5], color='yellow', linewidth=3, linestyle='-', label='Thigh (E-F)')
+        # F-G Line (Magenta)
+        ax4.plot([f_x, g_x], [5, 1], color='magenta', linewidth=3, linestyle='-', label='Shin (F-G)')
+        
+        ax4.text(e_x + 0.2, 9, 'E', fontsize=12, fontweight='bold')
+        ax4.text(f_x + 0.2, 5, 'F', fontsize=12, fontweight='bold')
+        ax4.text(g_x + 0.2, 1, 'G', fontsize=12, fontweight='bold')
+        
+        # Add Distance Text E-F (Yellow)
+        mid_x_ef = (e_x + f_x) / 2
+        mid_y_ef = (9 + 5) / 2
+        ax4.text(mid_x_ef, mid_y_ef, f"{m_thigh:.1f}mm", 
+                color='yellow', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='black', edgecolor='none', alpha=0.7))
 
-        plt.tight_layout(rect=[0, 0.15, 1, 1])
+        # Add Distance Text F-G (Magenta)
+        mid_x_fg = (f_x + g_x) / 2
+        mid_y_fg = (5 + 1) / 2
+        ax4.text(mid_x_fg, mid_y_fg, f"{m_shin:.1f}mm", 
+                color='magenta', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='black', edgecolor='none', alpha=0.7))
+        
+        set_dynamic_xlim(ax4, [e_x, f_x, g_x])
+        ax4.set_title('Leg', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax4.legend(loc='upper right')
+
+        plt.tight_layout()
 
         canvas = FigureCanvasTkAgg(fig, master=parent_frame)
         canvas.draw()
@@ -1196,94 +1710,119 @@ class DetailedReportWindow(tk.Toplevel):
         shoulder_angle = sh_data.get('slope_angle_deg', 0)
         hip_diff = hip_data.get('height_difference_mm', 0)
         hip_angle = hip_data.get('pelvic_tilt_angle', 0)
-        spine_deviation = spine_data.get('lateral_deviation_mm', 0)
-        final_score = score_data.get('adjusted_score', 0)
 
-        fig = plt.figure(figsize=(6, 12), facecolor='#1E1E1E')
+        kp = self.analysis_data.get('keypoints', {})
+        mm_px = self.analysis_data.get('conversion_ratio', 0.25)
+        
+        rc = kp.get('right_hip')
+        re = kp.get('right_knee')
+        rg = kp.get('right_ankle')
+
+        ld = kp.get('left_hip')
+        lf = kp.get('left_knee')
+        lh = kp.get('left_ankle')
+
+        # Increased width to 10 inches
+        fig = plt.figure(figsize=(10, 18), facecolor='#1E1E1E')
         self.graph_figures.append(fig)
 
-        ax1 = fig.add_subplot(311, facecolor='white')
+        def set_dynamic_xlim(ax, x_values, center=5, min_width=5):
+            max_dev = 0
+            if x_values:
+                max_dev = max([abs(x - center) for x in x_values])
+            limit = max(min_width, max_dev + 1)
+            ax.set_xlim(center - limit, center + limit)
+
+        # 1. SHOULDER
+        ax1 = fig.add_subplot(411, facecolor='white')
         ax1.set_xlim(0, 10)
         ax1.set_ylim(0, 10)
         ax1.grid(True, alpha=0.3)
-
-        ax1.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Reference')
-
+        ax1.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Ref')
         angle_rad = np.radians(shoulder_angle)
         x_end = 8
         y_end = 5 + (x_end - 5) * np.tan(angle_rad)
         ax1.plot([2, x_end], [5, y_end], 'r-', linewidth=4, label=f'Shoulder: {shoulder_diff:.1f}mm')
+        ax1.set_title('SHOULDER ALIGNMENT', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax1.legend(loc='lower right')
 
-        ax1.set_title('SHOULDER ANALYSIS', fontsize=12, fontweight='bold', pad=10)
-        ax1.text(5, 8.5, f'Height Diff: {shoulder_diff:.1f}mm | Angle: {shoulder_angle:.1f}°',
-                ha='center', fontsize=10, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='#FF6B6B', alpha=0.6))
-        ax1.legend(loc='lower right', fontsize=9)
-        ax1.set_xticks(range(0, 11, 2))
-        ax1.set_yticks(range(0, 11, 2))
-
-        ax2 = fig.add_subplot(312, facecolor='white')
+        # 2. PELVIS
+        ax2 = fig.add_subplot(412, facecolor='white')
         ax2.set_xlim(0, 10)
         ax2.set_ylim(0, 10)
         ax2.grid(True, alpha=0.3)
-
-        ax2.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Reference')
-
+        ax2.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Ref')
         hip_angle_rad = np.radians(hip_angle)
         hip_x_end = 8
         hip_y_end = 5 + (hip_x_end - 5) * np.tan(hip_angle_rad)
-        ax2.plot([2, hip_x_end], [5, hip_y_end], 'b-', linewidth=4, label=f'Hip: {hip_diff:.1f}mm')
+        ax2.plot([2, hip_x_end], [5, hip_y_end], 'b-', linewidth=4, label=f'Pelvis: {hip_diff:.1f}mm')
+        ax2.set_title('PELVIS ALIGNMENT', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax2.legend(loc='lower right')
 
-        ax2.set_title('HIP/PELVIS ANALYSIS', fontsize=12, fontweight='bold', pad=10)
-        ax2.text(5, 8.5, f'Height Diff: {hip_diff:.1f}mm | Tilt: {hip_angle:.1f}°',
-                ha='center', fontsize=10, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='#4ECDC4', alpha=0.6))
-        ax2.legend(loc='lower right', fontsize=9)
-        ax2.set_xticks(range(0, 11, 2))
-        ax2.set_yticks(range(0, 11, 2))
-
-        ax3 = fig.add_subplot(313, facecolor='white')
-        ax3.set_xlim(0, 10)
+        # 3. RIGHT LEG (C-E-G)
+        ax3 = fig.add_subplot(413, facecolor='white')
         ax3.set_ylim(0, 10)
         ax3.grid(True, alpha=0.3)
+        ax3.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
+        
+        c_x = 5
+        e_x = 5
+        g_x = 5
+        
+        if rc and re and rg:
+            # Shift in mm
+            scale = 1.0 / 120.0 # 1 unit = 120mm (adjusted for realistic aspect ratio)
+            dx_ce = (re['x'] - rc['x']) * mm_px
+            dx_eg = (rg['x'] - rc['x']) * mm_px
+            
+            e_x = 5 + (dx_ce * scale)
+            g_x = 5 + (dx_eg * scale)
+            
+        ax3.plot(c_x, 9, 'go', markersize=10, label='C (Hip)')
+        ax3.plot(e_x, 5, 'go', markersize=10, label='E (Knee)')
+        ax3.plot(g_x, 1, 'go', markersize=10, label='G (Ankle)')
+        ax3.plot([c_x, e_x], [9, 5], 'g-', linewidth=3, label='Alignment')
+        ax3.plot([e_x, g_x], [5, 1], 'g-', linewidth=3)
+        ax3.text(c_x + 0.2, 9, 'C', fontsize=10, fontweight='bold')
+        ax3.text(e_x + 0.2, 5, 'E', fontsize=10, fontweight='bold')
+        ax3.text(g_x + 0.2, 1, 'G', fontsize=10, fontweight='bold')
+        
+        set_dynamic_xlim(ax3, [c_x, e_x, g_x])
+        ax3.set_title('RIGHT LEG ALIGNMENT (C-E-G)', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax3.legend(loc='lower right')
 
-        ax3.plot([5, 5], [2, 8], 'k-', linewidth=2, label='Midline')
+        # 4. LEFT LEG (D-F-H)
+        ax4 = fig.add_subplot(414, facecolor='white')
+        ax4.set_ylim(0, 10)
+        ax4.grid(True, alpha=0.3)
+        ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
+        
+        d_x = 5
+        f_x = 5
+        h_x = 5
+        
+        if ld and lf and lh:
+             scale = 1.0 / 120.0 # 1 unit = 120mm
+             dx_df = (lf['x'] - ld['x']) * mm_px
+             dx_fh = (lh['x'] - ld['x']) * mm_px
+             
+             f_x = 5 + (dx_df * scale)
+             h_x = 5 + (dx_fh * scale)
+             
+        ax4.plot(d_x, 9, 'mo', markersize=10, label='D (Hip)')
+        ax4.plot(f_x, 5, 'mo', markersize=10, label='F (Knee)')
+        ax4.plot(h_x, 1, 'mo', markersize=10, label='H (Ankle)')
+        ax4.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Alignment')
+        ax4.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
+        ax4.text(d_x + 0.2, 9, 'D', fontsize=10, fontweight='bold')
+        ax4.text(f_x + 0.2, 5, 'F', fontsize=10, fontweight='bold')
+        ax4.text(h_x + 0.2, 1, 'H', fontsize=10, fontweight='bold')
+        
+        set_dynamic_xlim(ax4, [d_x, f_x, h_x])
+        ax4.set_title('LEFT LEG ALIGNMENT (D-F-H)', fontsize=16, fontweight='bold', pad=10, color='white')
+        ax4.legend(loc='lower right')
 
-        spine_x = 5 + (spine_deviation / 20)
-        ax3.plot([spine_x, spine_x], [2, 8], 'g-', linewidth=4, label=f'Spine: {spine_deviation:.1f}mm')
-
-        if abs(spine_deviation) > 2:
-            ax3.arrow(5, 5, spine_x - 5, 0, head_width=0.3, head_length=0.2,
-                     fc='orange', ec='orange', linewidth=2)
-
-        ax3.set_title('SPINE LATERAL DEVIATION', fontsize=12, fontweight='bold', pad=10)
-        ax3.text(5, 8.5, f'Lateral Deviation: {spine_deviation:.1f}mm',
-                ha='center', fontsize=10, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='#96CEB4', alpha=0.6))
-        ax3.legend(loc='lower right', fontsize=9)
-        ax3.set_xticks(range(0, 11, 2))
-        ax3.set_yticks(range(0, 11, 2))
-
-        summary_text = f"OVERALL SUMMARY\n\n"
-        summary_text += f"📊 ANTERIOR/POSTERIOR\n\n"
-        summary_text += f"Shoulder: {shoulder_diff:.1f}mm\n"
-        summary_text += f"Hip: {hip_diff:.1f}mm\n"
-        summary_text += f"Spine: {spine_deviation:.1f}mm\n"
-        summary_text += f"\n⚖️ SCORE: {final_score:.1f}/100\n"
-
-        if final_score < 30:
-            summary_text += "(Critical)"
-        elif final_score < 60:
-            summary_text += "(Needs Attention)"
-        else:
-            summary_text += "(Good)"
-
-        fig.text(0.98, 0.02, summary_text,
-                ha='right', va='bottom', fontsize=9,
-                family='monospace',
-                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9))
-
-        plt.tight_layout(rect=[0, 0.12, 1, 1])
+        plt.tight_layout()
 
         canvas = FigureCanvasTkAgg(fig, master=parent_frame)
         canvas.draw()

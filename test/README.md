@@ -104,6 +104,16 @@ The system uses **SQLite** (`kuro_posture.db`) with the following tables:
 - Removed "Score" column from data tables
 - Focus on physical measurements: Component, Parameter, Value, Unit, Status
 
+### Phase 18: Visualization & User Experience
+- **Graph Legends**: Added clear legends to all measurement graphs for better interpretability.
+- **On-Graph Annotations**: Direct mm measurements displayed on lateral graphs (e.g., ear-to-shoulder, pelvic width).
+- **Refined Titles**: Context-aware graph titles (Head, Spine, Pelvis, Leg) for lateral views.
+- **Improved Alignment**: 
+  - Corrected lateral point G placement.
+  - Enforced A-B (Head) vertical alignment.
+  - Refined Leg Alignment (E-F-G) visualization.
+- **Cleaner Reporting**: Simplified text status indicators and removed redundant prefixes.
+
 ## Development
 
 ### Running in VSCode

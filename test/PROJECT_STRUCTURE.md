@@ -90,6 +90,7 @@ Desktop application built with Tkinter, following a modern dark-themed aesthetic
 - **screens/results.py**: Comprehensive analysis dashboard with:
   - Before/After comparison
   - Detailed metrics table (Component, Parameter, Value, Unit, Status)
+  - **Enhanced Graphs**: Dedicated plots with legends and on-chart annotations
   - Biomechanical analysis report
   - Export functionality
 
@@ -146,6 +147,11 @@ Contains tools for verifying model accuracy and keypoint mapping:
 ### Phase 17: Streamlined Reporting
 - Removed "Score" column from data tables
 - Focus on physical measurements
+
+### Phase 18: Visualization & User Experience
+- **Graphs**: Added legends, annotations, and better scaling
+- **Alignment**: Corrected G point and Head (A-B) verticality
+- **UI**: Simplified status text and clear Titles (Head, Spine, Pelvis, Leg)
 
 ### Phase 15: Stability
 - Fixed 500 error in lateral analysis

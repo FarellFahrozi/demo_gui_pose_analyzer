@@ -72,6 +72,9 @@ class PostureAnalyzerService:
         spinal_analysis = analyzer.analyze_spinal_alignment_advanced(keypoints)
         head_analysis = analyzer.analyze_head_alignment_advanced(keypoints)
         lateral_distances = analyzer.analyze_lateral_distances(keypoints)
+        
+        leg_analysis_anterior = analyzer.analyze_leg_alignment_anterior(keypoints)
+        leg_analysis_lateral = analyzer.analyze_leg_alignment_lateral(keypoints)
 
         analysis_results = {
             'keypoints': keypoints,
@@ -83,7 +86,9 @@ class PostureAnalyzerService:
             'hip': hip_analysis,
             'spinal': spinal_analysis,
             'head': head_analysis,
-            'lateral_distances': lateral_distances
+            'lateral_distances': lateral_distances,
+            'leg_anterior': leg_analysis_anterior,
+            'leg_lateral': leg_analysis_lateral
         }
 
         postural_angles = analyzer.analyze_postural_angles(keypoints)

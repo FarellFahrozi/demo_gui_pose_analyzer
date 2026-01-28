@@ -402,8 +402,9 @@ class UploadScreen(ttk.Frame):
             if hasattr(self, 'preview_label'):
                 self.preview_label.place_forget()
             
-            # Load image
+            # Load image with EXIF rotation handled
             img = Image.open(image_path)
+            img = ImageOps.exif_transpose(img)
             original_width, original_height = img.size
             
             # Dapatkan ukuran canvas yang tersedia
@@ -682,13 +683,13 @@ class UploadScreen(ttk.Frame):
                 except Exception as e:
                     print(f"Keypoint calculation fallback: {e}")
 
-            # Gambar Garis Vertikal (Mengikuti sumbu tubuh)
-            self._draw_dashed_line(img_draw, (target_x, 0), (target_x, height), 
-                                  color=red_color, width=2, dash_length=15)
+            # Gambar Garis Vertikal (Mengikuti sumbu tubuh) - DISABLED per request
+            # self._draw_dashed_line(img_draw, (target_x, 0), (target_x, height), 
+            #                       color=red_color, width=2, dash_length=15)
             
-            # Gambar Garis Horizontal (Mengikuti level bahu)
-            self._draw_dashed_line(img_draw, (0, target_y), (width, target_y), 
-                                  color=red_color, width=2, dash_length=10)
+            # Gambar Garis Horizontal (Mengikuti level bahu) - DISABLED per request
+            # self._draw_dashed_line(img_draw, (0, target_y), (width, target_y), 
+            #                       color=red_color, width=2, dash_length=10)
 
             return image
         except Exception as e:
@@ -884,6 +885,41 @@ class UploadScreen(ttk.Frame):
                 return 'right'
         
         return 'unknown'
+        
+        # If class name is ambiguous, try Geometric Detection
+        # Heuristic: Compare Shoulder Width (X-dist) vs BBox Width
+        try:
+            for detection in detections['all_detections']:
+                kp = detection.get('keypoints', {})
+                bbox = detection.get('bbox', {})
+                
+                if kp and bbox:
+                    # COCO Indices: 5=L_Shoulder, 6=R_Shoulder
+                    # Note: API usually returns keypoints as list of [x, y, conf]
+                    # We need to parse detection structure carefully
+                    # Assuming standard structure from API response
+                    
+                    # Calculate Shoulder Width
+                    # We need raw keypoints. If API returns them, we use them.
+                    # Simplified check: average confidence of Left vs Right was used for side.
+                    # For Front vs Side: Check aspect ratio of torso?
+                    
+                    # Robust Heuristic: Shoulder X-Distance / BBox Width
+                    # Frontal view: Shoulder X-distance is large (approx 40-60% of bbox width)
+                    # Lateral view: Shoulder X-distance is small (shoulders overlap, < 20% width)
+                    
+                    # Assuming keypoints are available in detection['keypoints']
+                    # If strictly class-based, we might not have KPs here easily without parsing.
+                    # fallback to 'front' if ambiguous is safer than 'unknown' for "Normal"
+                    pass
+                    
+            # Auto-default to 'front' if class is "Normal" or "Lordosis" without direction
+            # This is a safe assumption for general screenings unless proven otherwise by specific lateral logic
+            # However, to be smarter, let's rely on the result to be "front" to trigger _is_frontal() logic
+            return 'front' 
+            
+        except Exception:
+            return 'front' # Default fail-safe
 
 
     def _classify_posture(self, class_name):
