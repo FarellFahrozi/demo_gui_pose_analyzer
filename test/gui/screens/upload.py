@@ -899,7 +899,7 @@ class UploadScreen(ttk.Frame):
                 'image_rgb': img_rgb,
                 'image_path': self.image_path,
                 'analysis_type': 'full_analysis',
-                'view_type': data.get('detections', {}).get('all_detections', [{}])[0].get('classification', 'unknown'),
+                'view_type': (data.get('detections', {}).get('all_detections', []) or [{}])[0].get('classification', 'unknown'),
                 'confidence_threshold': self.confidence_threshold
             }
 
@@ -912,7 +912,7 @@ class UploadScreen(ttk.Frame):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self.parent.after(0, lambda: self._analysis_error(str(e)))
+            self.parent.after(0, lambda err=str(e): self._analysis_error(err))
 
 
     def _determine_view_type(self, detections):

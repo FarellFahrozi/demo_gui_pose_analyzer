@@ -261,9 +261,42 @@ class ResultsScreen(ttk.Frame):
                                         f"Export all {len(self.batch_data)} images in this batch?\n\nThis will save original, analyzed, and graph images for EACH result.",
                                         icon='question')
             if confirm:
+                # Determine Classification for Folder Name
+                classification = "Unknown"
+                input_folder_name = "Unknown"
+
+                if self.batch_data:
+                    # Use first image to determine batch class and folder name
+                    data = self.batch_data[0]
+                    
+                    # 1. Get Folder Name
+                    img_path = data.get('image_path', '')
+                    if img_path:
+                        try:
+                            input_folder_name = os.path.basename(os.path.dirname(img_path))
+                        except:
+                            pass
+
+                    # 2. Get Classification
+                    detections = data.get('detections', {})
+                    if detections and 'all_detections' in detections and len(detections['all_detections']) > 0:
+                         det = detections['all_detections'][0]
+                         full_class_name = det.get('classification', det.get('sub_category', 'Unknown'))
+                         if '-' in full_class_name:
+                             classification = full_class_name.split('-')[0]
+                         else:
+                             classification = full_class_name
+                
+                # Sanitize
+                classification = "".join([c for c in classification if c.isalnum() or c in (' ', '_')]).strip()
+                if not classification: classification = "Unknown"
+                
+                input_folder_name = "".join([c for c in input_folder_name if c.isalnum() or c in (' ', '_')]).strip()
+                if not input_folder_name: input_folder_name = "Batch"
+
                 # Create a specific folder for this batch export
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                batch_dir = os.path.join(results_dir, f"batch_export_{timestamp}")
+                # Format: batch_export_FolderName_Classification
+                batch_dir = os.path.join(results_dir, f"batch_export_{input_folder_name}_{classification}")
                 if not os.path.exists(batch_dir):
                     os.makedirs(batch_dir)
                 
@@ -304,9 +337,9 @@ class ResultsScreen(ttk.Frame):
                     progress_win.destroy()
                     messagebox.showinfo("Export Complete", f"Successfully exported {success_count} results to:\n{batch_dir}")
                     
-                except Exception as e:
+                except Exception as err:
                     progress_win.destroy()
-                    messagebox.showerror("Export Error", f"Error during batch export: {e}")
+                    messagebox.showerror("Export Error", f"Error during batch export: {err}")
                 
                 finally:
                     # Restore original view
@@ -317,33 +350,51 @@ class ResultsScreen(ttk.Frame):
         # SINGLE IMAGE EXPORT
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Create subfolder for this result to keep it organized
+            # Try to get base name
+            base_name = "image"
+            if isinstance(self.analysis_data, dict):
+                img_path = self.analysis_data.get('image_path', '')
+                if img_path:
+                     base_name = os.path.splitext(os.path.basename(img_path))[0]
+            
+            # Sanitize base_name
+            base_name = "".join([c for c in base_name if c.isalnum() or c in (' ', '_', '-')]).strip()
+            
+            # Folder format: ImageName_analysis_Timestamp
+            result_subfolder = os.path.join(results_dir, f"{base_name}_analysis_{timestamp}")
+            if not os.path.exists(result_subfolder):
+                os.makedirs(result_subfolder)
+
             exported_files = []
 
             if self.original_image is not None:
                 original_filename = f"original_{self.view_type}_{timestamp}.png"
-                original_path = os.path.join(results_dir, original_filename)
+                original_path = os.path.join(result_subfolder, original_filename)
                 img_bgr = cv2.cvtColor(self.original_image, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(original_path, img_bgr)
                 exported_files.append(original_filename)
 
             if self.processed_image is not None:
                 processed_filename = f"processed_{self.view_type}_{timestamp}.png"
-                processed_path = os.path.join(results_dir, processed_filename)
+                processed_path = os.path.join(result_subfolder, processed_filename)
                 img_bgr = cv2.cvtColor(self.processed_image, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(processed_path, img_bgr)
                 exported_files.append(processed_filename)
 
             for idx, fig in enumerate(self.graph_figures):
-                graph_filename = f"graph_{idx+1}_{self.view_type}_{timestamp}.png"
-                graph_path = os.path.join(results_dir, graph_filename)
+                graph_name = getattr(fig, '_custom_name', f"{idx+1}")
+                graph_filename = f"graph_{graph_name}_{self.view_type}_{timestamp}.png"
+                graph_path = os.path.join(result_subfolder, graph_filename)
                 fig.savefig(graph_path, dpi=150, bbox_inches='tight', facecolor='white')
                 exported_files.append(graph_filename)
 
             files_list = "\n".join([f"✓ {f}" for f in exported_files])
             messagebox.showinfo("Export Success",
                               f"Files successfully exported to:\n{results_dir}/\n\n{files_list}")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export images: {e}")
+        except Exception as err:
+            messagebox.showerror("Export Error", f"Failed to export images: {err}")
 
     def export_batch_result(self, output_dir):
         """Export result silently for batch processing"""
@@ -377,7 +428,9 @@ class ResultsScreen(ttk.Frame):
                 exported_paths.append(processed_path)
 
             for idx, fig in enumerate(self.graph_figures):
-                graph_filename = f"{base_name}_graph_{idx+1}.png"
+                # Use custom name if available (e.g., Head, Spine)
+                graph_name = getattr(fig, '_custom_name', f"graph_{idx+1}")
+                graph_filename = f"{base_name}_graph_{graph_name}.png"
                 graph_path = os.path.join(img_result_dir, graph_filename)
                 fig.savefig(graph_path, dpi=150, bbox_inches='tight', facecolor='white')
                 exported_paths.append(graph_path)
@@ -385,11 +438,11 @@ class ResultsScreen(ttk.Frame):
             print(f"[SUCCESS] Batch Export Success: {base_name}")
             return True, exported_paths
             
-        except Exception as e:
-            print(f"[ERROR] Batch Export Error for {base_name}: {e}")
+        except Exception as err:
+            print(f"[ERROR] Batch Export Error for {base_name}: {err}")
             import traceback
             traceback.print_exc()
-            return False, str(e)
+            return False, str(err)
 
     def _export_batch_csv(self):
         """Export batch results to CSV with specific formatting"""
@@ -544,23 +597,19 @@ class ResultsScreen(ttk.Frame):
             traceback.print_exc()
 
     def _generate_lateral_figures(self):
-        # Re-implementation of graph logic for headless export
+        # Re-implementation of graph logic for headless export - SPLIT INTO SEPARATE FIGURES
         head_data = self.analysis_data.get('head', {})
+        lat_dists = self.analysis_data.get('lateral_distances', {})
+        keypoints = self.analysis_data.get('keypoints', {})
+        mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
         
-        # Increased width/height for high-res export
-        fig = plt.figure(figsize=(10, 25), facecolor='white') # White background for export
-        self.graph_figures.append(fig)
-
+        # Helper for dynamic xlim
         def set_dynamic_xlim(ax, x_values, center=5, min_width=5):
             max_dev = 0
             if x_values:
                 max_dev = max([abs(x - center) for x in x_values])
             limit = max(min_width, max_dev + 1)
             ax.set_xlim(center - limit, center + limit)
-
-        lat_dists = self.analysis_data.get('lateral_distances', {})
-        keypoints = self.analysis_data.get('keypoints', {})
-        mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
         
         def get_dist(key, p1_name, p2_name):
              val = lat_dists.get(key, 0)
@@ -582,22 +631,20 @@ class ResultsScreen(ttk.Frame):
         m_thigh = 0
         if ke and kf:
              m_thigh = np.sqrt((ke['x']-kf['x'])**2 + (ke['y']-kf['y'])**2) * mm_per_px
-             
         m_shin = 0
         if kf and kg:
              m_shin = np.sqrt((kf['x']-kg['x'])**2 + (kf['y']-kg['y'])**2) * mm_per_px
 
-        # 1. HEAD
-        ax1 = fig.add_subplot(411, facecolor='white')
+        # --- FIGURE 1: HEAD ---
+        fig1 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax1 = fig1.add_subplot(111)
         ax1.set_ylim(0, 10)
         ax1.grid(True, alpha=0.3)
         ax1.plot([5, 5], [2, 8], 'k--', linewidth=2, label='Vertical') 
         
         ka = self.analysis_data.get('keypoints', {}).get('lateral_ear')
         kb = self.analysis_data.get('keypoints', {}).get('lateral_shoulder')
-        
-        a_x = 5
-        b_x = 5
+        a_x = 5; b_x = 5
         if ka and kb:
             shift_mm = (ka['x'] - kb['x']) * mm_per_px
             scale = 1.0 / 60.0
@@ -608,28 +655,29 @@ class ResultsScreen(ttk.Frame):
         ax1.plot(b_x, 4, 'ro', markersize=10, label='B (Shoulder)')
         ax1.text(a_x + 0.2, 7, 'A', fontsize=12, fontweight='bold')
         ax1.text(b_x + 0.2, 4, 'B', fontsize=12, fontweight='bold')
-        
         mid_x_ab = (a_x + b_x) / 2
         mid_y_ab = (7 + 4) / 2
         ax1.text(mid_x_ab, mid_y_ab, f"{m_ear_sh:.1f}mm", 
                 color='#00AA00', fontsize=10, fontweight='bold', ha='center',
                 bbox=dict(facecolor='white', edgecolor='green', alpha=0.7))
-        
         set_dynamic_xlim(ax1, [a_x, b_x])
         ax1.set_title('Head Analysis', fontsize=16, fontweight='bold', pad=10)
         ax1.legend(loc='upper right')
+        
+        fig1._custom_name = "Head"
+        self.graph_figures.append(fig1)
 
-        # 2. SPINE
-        ax2 = fig.add_subplot(412, facecolor='white')
+        # --- FIGURE 2: SPINE ---
+        fig2 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax2 = fig2.add_subplot(111)
         ax2.set_ylim(0, 10)
         ax2.grid(True, alpha=0.3)
         ax2.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Vertical')
         
-        ke = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_center')
-        b_x = 5
-        e_x = 5
-        if kb and ke:
-            shift_mm = (kb['x'] - ke['x']) * mm_per_px
+        ke_pt = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_center')
+        b_x = 5; e_x = 5
+        if kb and ke_pt:
+            shift_mm = (kb['x'] - ke_pt['x']) * mm_per_px
             scale = 1.0 / 60.0
             b_x = 5 + (shift_mm * scale)
         
@@ -638,28 +686,28 @@ class ResultsScreen(ttk.Frame):
         ax2.plot([b_x, e_x], [8, 3], 'c-', linewidth=2, label='Alignment')
         ax2.text(b_x + 0.2, 8, 'B', fontsize=12, fontweight='bold')
         ax2.text(e_x + 0.2, 3, 'E', fontsize=12, fontweight='bold')
-        
         mid_x_be = (b_x + e_x) / 2
         mid_y_be = (8 + 3) / 2
         ax2.text(mid_x_be, mid_y_be, f"{m_sh_pel:.1f}mm", 
                 color='cyan', fontsize=10, fontweight='bold', ha='center',
                 bbox=dict(facecolor='black', edgecolor='none', alpha=0.7))
-        
         set_dynamic_xlim(ax2, [b_x, e_x])
         ax2.set_title('Spine Analysis', fontsize=16, fontweight='bold', pad=10)
         ax2.legend(loc='upper right')
+        
+        fig2._custom_name = "Spine"
+        self.graph_figures.append(fig2)
 
-        # 3. PELVIS
-        ax3 = fig.add_subplot(413, facecolor='white')
+        # --- FIGURE 3: PELVIS ---
+        fig3 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax3 = fig3.add_subplot(111)
         ax3.set_ylim(0, 10)
         ax3.grid(True, alpha=0.3)
         ax3.plot([2, 8], [5, 5], 'k--', linewidth=2, label='Horizontal')
         
         kc = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_back')
         kd = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_front')
-        
-        y_c = 5
-        y_d = 5
+        y_c = 5; y_d = 5
         if kc and kd:
             scale_y = 1.0 / 10.0
             diff_graph = (kd['y'] - kc['y']) * mm_per_px * scale_y
@@ -667,35 +715,32 @@ class ResultsScreen(ttk.Frame):
             
         is_facing_right = 'right' in self.view_type.lower()
         cx, dx = (3, 7) if is_facing_right else (7, 3) 
-
         ax3.plot(cx, y_c, 'bo', markersize=10, label='C (Back)')
         ax3.plot(dx, y_d, 'bo', markersize=10, label='D (Front)')
         ax3.plot([cx, dx], [y_c, y_d], 'b-', linewidth=3, label='Pelvic Line')
         ax3.text(cx, y_c + 0.5, 'C', fontsize=12, fontweight='bold')
         ax3.text(dx, y_d + 0.5, 'D', fontsize=12, fontweight='bold')
-        
         mid_x_cd = (cx + dx) / 2
         mid_y_cd = (y_c + y_d) / 2
         ax3.text(mid_x_cd, mid_y_cd, f"{m_pel_wd:.1f}mm", 
                 color='blue', fontsize=10, fontweight='bold', ha='center',
                 bbox=dict(facecolor='white', edgecolor='blue', alpha=0.7))
-        
         min_y, max_y = min(y_c, y_d), max(y_c, y_d)
         ax3.set_ylim(min_y - 2, max_y + 2)
         ax3.set_xlim(0, 10)
         ax3.set_title('Pelvis Analysis', fontsize=16, fontweight='bold', pad=10)
         ax3.legend(loc='upper right')
+        
+        fig3._custom_name = "Pelvis"
+        self.graph_figures.append(fig3)
 
-        # 4. LEG
-        ax4 = fig.add_subplot(414, facecolor='white')
+        # --- FIGURE 4: LEG ---
+        fig4 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax4 = fig4.add_subplot(111)
         ax4.set_ylim(0, 10)
         ax4.grid(True, alpha=0.3)
         ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Plumb')
-        
-        e_x = 5
-        f_x = 5
-        g_x = 5
-        
+        e_x = 5; f_x = 5; g_x = 5
         if ke and kf and kg:
              scale = 1.0 / 60.0 # 1 unit = 60mm
              dx_ef = (kf['x'] - ke['x']) * mm_per_px
@@ -709,28 +754,25 @@ class ResultsScreen(ttk.Frame):
         
         ax4.plot([e_x, f_x], [9, 5], color='yellow', linewidth=3, linestyle='-', label='Thigh (E-F)')
         ax4.plot([f_x, g_x], [5, 1], color='magenta', linewidth=3, linestyle='-', label='Shin (F-G)')
-        
         ax4.text(e_x + 0.2, 9, 'E', fontsize=12, fontweight='bold')
         ax4.text(f_x + 0.2, 5, 'F', fontsize=12, fontweight='bold')
         ax4.text(g_x + 0.2, 1, 'G', fontsize=12, fontweight='bold')
-        
         mid_x_ef = (e_x + f_x) / 2
         mid_y_ef = (9 + 5) / 2
         ax4.text(mid_x_ef, mid_y_ef, f"{m_thigh:.1f}mm", 
                 color='black', fontsize=10, fontweight='bold', ha='center',
                 bbox=dict(facecolor='yellow', edgecolor='none', alpha=0.7))
-
         mid_x_fg = (f_x + g_x) / 2
         mid_y_fg = (5 + 1) / 2
         ax4.text(mid_x_fg, mid_y_fg, f"{m_shin:.1f}mm", 
                 color='white', fontsize=10, fontweight='bold', ha='center',
                 bbox=dict(facecolor='magenta', edgecolor='black', alpha=0.7))
-        
         set_dynamic_xlim(ax4, [e_x, f_x, g_x])
         ax4.set_title('Leg Analysis', fontsize=16, fontweight='bold', pad=10)
         ax4.legend(loc='upper right')
         
-        plt.tight_layout()
+        fig4._custom_name = "Leg"
+        self.graph_figures.append(fig4)
 
     def _generate_frontal_figures(self):
         sh_data = self.analysis_data.get('shoulder', {})
@@ -752,11 +794,17 @@ class ResultsScreen(ttk.Frame):
         lf = kp.get('left_knee')
         lh = kp.get('left_ankle')
 
-        fig = plt.figure(figsize=(10, 18), facecolor='white')
-        self.graph_figures.append(fig)
+        # Helper for dynamic xlim
+        def set_dynamic_xlim(ax, x_values, center=5, min_width=5):
+            max_dev = 0
+            if x_values:
+                max_dev = max([abs(x - center) for x in x_values])
+            limit = max(min_width, max_dev + 1)
+            ax.set_xlim(center - limit, center + limit)
 
-        # 1. SHOULDER
-        ax1 = fig.add_subplot(411, facecolor='white')
+        # --- FIGURE 1: SHOULDER ---
+        fig1 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax1 = fig1.add_subplot(111)
         ax1.set_xlim(0, 10)
         ax1.set_ylim(0, 10)
         ax1.grid(True, alpha=0.3)
@@ -767,9 +815,13 @@ class ResultsScreen(ttk.Frame):
         ax1.plot([2, x_end], [5, y_end], 'r-', linewidth=4, label=f'Shoulder: {shoulder_diff:.1f}mm')
         ax1.set_title('SHOULDER ALIGNMENT', fontsize=16, fontweight='bold', pad=10)
         ax1.legend(loc='lower right')
+        
+        fig1._custom_name = "Shoulder"
+        self.graph_figures.append(fig1)
 
-        # 2. PELVIS
-        ax2 = fig.add_subplot(412, facecolor='white')
+        # --- FIGURE 2: PELVIS ---
+        fig2 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax2 = fig2.add_subplot(111)
         ax2.set_xlim(0, 10)
         ax2.set_ylim(0, 10)
         ax2.grid(True, alpha=0.3)
@@ -781,57 +833,58 @@ class ResultsScreen(ttk.Frame):
         ax2.set_title('PELVIS ALIGNMENT', fontsize=16, fontweight='bold', pad=10)
         ax2.legend(loc='lower right')
 
-        # 3. RIGHT LEG
-        ax3 = fig.add_subplot(413, facecolor='white')
+        fig2._custom_name = "Pelvis"
+        self.graph_figures.append(fig2)
+
+        # --- FIGURE 3: RIGHT LEG ---
+        fig3 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax3 = fig3.add_subplot(111)
         ax3.set_ylim(0, 10)
         ax3.grid(True, alpha=0.3)
         ax3.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
-        
-        c_x = 5
-        e_x = 5
-        g_x = 5
-        
+        c_x = 5; e_x = 5; g_x = 5
         if rc and re and rg:
             scale = 1.0 / 120.0 
             dx_ce = (re['x'] - rc['x']) * mm_px
             dx_eg = (rg['x'] - rc['x']) * mm_px
             e_x = 5 + (dx_ce * scale)
             g_x = 5 + (dx_eg * scale)
-            
         ax3.plot(c_x, 9, 'go', markersize=10, label='C (Hip)')
         ax3.plot(e_x, 5, 'go', markersize=10, label='E (Knee)')
         ax3.plot(g_x, 1, 'go', markersize=10, label='G (Ankle)')
         ax3.plot([c_x, e_x], [9, 5], 'g-', linewidth=3, label='Alignment')
         ax3.plot([e_x, g_x], [5, 1], 'g-', linewidth=3)
-        
-        def set_dynamic_xlim(ax, x_values, center=5, min_width=5):
-            max_dev = 0
-            if x_values:
-                max_dev = max([abs(x - center) for x in x_values])
-            limit = max(min_width, max_dev + 1)
-            ax.set_xlim(center - limit, center + limit)
-
         set_dynamic_xlim(ax3, [c_x, e_x, g_x])
         ax3.set_title('RIGHT LEG ALIGNMENT (C-E-G)', fontsize=16, fontweight='bold', pad=10)
         ax3.legend(loc='lower right')
 
-        # 4. LEFT LEG
-        ax4 = fig.add_subplot(414, facecolor='white')
+        fig3._custom_name = "RightLeg"
+        self.graph_figures.append(fig3)
+
+        # --- FIGURE 4: LEFT LEG ---
+        fig4 = plt.figure(figsize=(8, 6), facecolor='white')
+        ax4 = fig4.add_subplot(111)
         ax4.set_ylim(0, 10)
         ax4.grid(True, alpha=0.3)
         ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
-        
-        d_x = 5
-        f_x = 5
-        h_x = 5
-        
+        d_x = 5; f_x = 5; h_x = 5
         if ld and lf and lh:
              scale = 1.0 / 120.0 
              dx_df = (lf['x'] - ld['x']) * mm_px
              dx_fh = (lh['x'] - ld['x']) * mm_px
              f_x = 5 + (dx_df * scale)
              h_x = 5 + (dx_fh * scale)
-             
+        ax4.plot(d_x, 9, 'mo', markersize=10, label='D (Hip)')
+        ax4.plot(f_x, 5, 'mo', markersize=10, label='F (Knee)')
+        ax4.plot(h_x, 1, 'mo', markersize=10, label='H (Ankle)')
+        ax4.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Alignment')
+        ax4.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
+        set_dynamic_xlim(ax4, [d_x, f_x, h_x])
+        ax4.set_title('LEFT LEG ALIGNMENT (D-F-H)', fontsize=16, fontweight='bold', pad=10)
+        ax4.legend(loc='lower right')
+        
+        fig4._custom_name = "LeftLeg"
+        self.graph_figures.append(fig4)             
         ax4.plot(d_x, 9, 'mo', markersize=10, label='D (Hip)')
         ax4.plot(f_x, 5, 'mo', markersize=10, label='F (Knee)')
         ax4.plot(h_x, 1, 'mo', markersize=10, label='H (Ankle)')
