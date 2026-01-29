@@ -29,6 +29,11 @@ The Postural Assessment System has been successfully refined and is ready for cl
 - **Error Resolution**: Fixed 500 Internal Server Error in lateral analysis.
 - **Robust Processing**: Enhanced error handling and data validation.
 
+### 6. Batch Efficiency (Phase 19)
+- **Batch CSV Export**: One-click export of summary data for entire image folders.
+- **Excel Auto-Format**: `UTF-8-SIG` encoding for immediate Excel compatibility.
+- **Smart Data Extraction**: Automatically parses Folder Names for IDs and Classifications for Anotasi.
+
 ## Updated Project Structure
 
 ### Documentation
@@ -36,6 +41,7 @@ The Postural Assessment System has been successfully refined and is ready for cl
 - `SETUP_GUIDE.md` - Comprehensive setup with troubleshooting
 - `QUICKSTART.md` - 5-minute quick start guide
 - `PROJECT_STRUCTURE.md` - Detailed directory descriptions
+- `BATCH_EXPORT_TUTORIAL.md` - Guide for using the Batch CSV Export feature
 
 ### Core & Scripts
 - `test/core/pose_analyzer.py` - Enhanced with medical alignment logic
@@ -86,7 +92,9 @@ http://127.0.0.1:8000/docs
 - **Phase 15**: Stability improvements (500 error fix)
 - **Phase 16**: Enhanced pelvic line visualization
 - **Phase 17**: Streamlined reporting (score removal)
+- **Phase 17**: Streamlined reporting (score removal)
 - **Phase 18**: Enhanced visualization (Legends, Annotations & Graph Titles)
+- **Phase 19**: Batch CSV Export & Code Cleanup
 
 ---
 

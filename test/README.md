@@ -12,6 +12,7 @@ Advanced Posture Analysis System with GUI and REST API integration. This system 
 - **Medical Alignment**: Lateral views feature B-E-F vertical plumb line and 30° slanted pelvic line
 - **Local SQLite database** for data persistence and offline capability
 - **Streamlined reporting** with essential metrics only
+- **Batch CSV Export** with custom Dataset ID and View-based formatting
 
 ## Project Structure
 ```
@@ -113,6 +114,12 @@ The system uses **SQLite** (`kuro_posture.db`) with the following tables:
   - Enforced A-B (Head) vertical alignment.
   - Refined Leg Alignment (E-F-G) visualization.
 - **Cleaner Reporting**: Simplified text status indicators and removed redundant prefixes.
+
+### Phase 19: Batch Export & Cleanup
+- **Batch CSV Recap**: Automated CSV export for batch analysis.
+  - **Auto-Formatting**: Merged headers and view-specific classification columns.
+  - **Smart ID**: Dataset ID combines Folder Name + Filename.
+- **Codebase Cleanup**: Removed redundant debug scripts for a cleaner project structure.
 
 ## Development
 

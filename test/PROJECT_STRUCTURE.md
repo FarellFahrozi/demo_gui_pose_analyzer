@@ -8,6 +8,7 @@ test/
 ├── QUICKSTART.md                      # 5-minute quick start guide
 ├── PROJECT_STRUCTURE.md               # This file
 ├── DEPLOYMENT_COMPLETE.md             # Recent improvements and version info
+├── BATCH_EXPORT_TUTORIAL.md           # Tutorial for Batch CSV Export
 ├── requirements.txt                   # Python dependencies
 ├── .env.example                       # Environment variables template
 ├── .env                              # Environment variables (not in git)
@@ -48,8 +49,7 @@ test/
 │   └── utils/                        # Utilities
 │
 ├── scripts/                          # Utility scripts
-│   ├── probe_lateral_indices.py      # Lateral keypoint debugging
-│   └── debug_yolo.py                 # YOLO detection verification
+│   └── (Empty)                       # Debug scripts removed in cleanup
 │
 ├── kuro_posture.db                   # Local SQLite Database (auto-created)
 ├── uploads/                          # Temporary upload directory (auto-created)
@@ -91,8 +91,11 @@ Desktop application built with Tkinter, following a modern dark-themed aesthetic
   - Before/After comparison
   - Detailed metrics table (Component, Parameter, Value, Unit, Status)
   - **Enhanced Graphs**: Dedicated plots with legends and on-chart annotations
+  - **Enhanced Graphs**: Dedicated plots with legends and on-chart annotations
   - Biomechanical analysis report
-  - Export functionality
+  - **Export Functionality**:
+    - Image Export (Original, Analyzed, Graphs)
+    - **Batch CSV Recap**: Specialized logical CSV for batch analysis
 
 ### /api
 
@@ -102,10 +105,8 @@ REST API built with FastAPI for web integration and batch processing:
 - **services/analyzer.py**: Analysis orchestration
 
 ### /scripts
-
-Contains tools for verifying model accuracy and keypoint mapping:
-- **probe_lateral_indices.py**: Debug lateral keypoint detection
-- **debug_yolo.py**: Verify YOLO model output
+ 
+Previously contained debug tools (`probe_lateral_indices.py`, `debug_yolo.py`) which have been removed as part of Phase 19 cleanup.
 
 ## Key Features by Component
 
