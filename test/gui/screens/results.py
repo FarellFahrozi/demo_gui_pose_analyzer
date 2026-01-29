@@ -9,6 +9,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import io
+import base64
 
 class ResultsScreen(ttk.Frame):
     def __init__(self, parent, app):
@@ -18,6 +19,18 @@ class ResultsScreen(ttk.Frame):
         self.pack(fill=tk.BOTH, expand=True)
 
         self.analysis_data = app.analysis_data
+        
+        # Handle Batch Data
+        self.batch_data = []
+        self.current_batch_index = 0
+        self.is_batch_view = False
+        
+        if isinstance(self.analysis_data, list):
+             self.batch_data = self.analysis_data
+             self.is_batch_view = True
+             self.current_batch_index = 0
+             self.analysis_data = self.batch_data[0] # Start with first image
+        
         self.view_type = self.analysis_data.get('view_type', 'anterior').lower()
         self.patient_data = self.app.patient_data
 
@@ -66,16 +79,63 @@ class ResultsScreen(ttk.Frame):
         self.summary_frame = tk.Frame(self.main_container, bg='#1E1E1E')
         self.summary_frame.pack(fill=tk.BOTH, padx=20, pady=(0, 10), expand=True)
 
-        self.action_frame = tk.Frame(self.main_container, bg='#1E1E1E', height=60)
+        self.action_frame = tk.Frame(self.main_container, bg='#1E1E1E', height=80)
         self.action_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=0, pady=0)
 
-        btn_detail = tk.Button(self.action_frame,
+        self._update_action_bar()
+
+    def _update_action_bar(self):
+        # Clear existing buttons
+        for widget in self.action_frame.winfo_children():
+            widget.destroy()
+
+        # Left Side container for Navigation
+        left_action = tk.Frame(self.action_frame, bg='#1E1E1E')
+        left_action.pack(side=tk.LEFT, padx=20, pady=15)
+
+        if self.is_batch_view:
+            self.btn_prev = tk.Button(left_action, text="◀ Previous", 
+                                      command=self._prev_image,
+                                      bg='#333', fg='white', bd=0, font=('Segoe UI', 10, 'bold'),
+                                      padx=15, pady=8, cursor='hand2')
+            self.btn_prev.pack(side=tk.LEFT, padx=5)
+            
+            self.lbl_batch_status = tk.Label(left_action, 
+                                             text=f"{self.current_batch_index + 1} / {len(self.batch_data)}",
+                                             bg='#1E1E1E', fg='white', font=('Segoe UI', 12, 'bold'))
+            self.lbl_batch_status.pack(side=tk.LEFT, padx=10)
+            
+            self.btn_next = tk.Button(left_action, text="Next ▶", 
+                                      command=self._next_image,
+                                      bg='#1E90FF', fg='white', bd=0, font=('Segoe UI', 10, 'bold'),
+                                      padx=15, pady=8, cursor='hand2')
+            self.btn_next.pack(side=tk.LEFT, padx=5)
+            
+            self._update_nav_buttons()
+
+        # Right Side container for Actions
+        right_action = tk.Frame(self.action_frame, bg='#1E1E1E')
+        right_action.pack(side=tk.RIGHT, padx=20, pady=15)
+
+        # Export Button (Moved here)
+        tk.Button(right_action, text="🖼️ Export Images", command=self._export_images_to_results,
+                  bg='#FF9800', fg='white', bd=0, font=('Segoe UI', 10, 'bold'),
+                  padx=15, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+
+        # Batch CSV Export Button
+        if self.is_batch_view:
+             tk.Button(right_action, text="📄 Export Batch Recap", command=self._export_batch_csv,
+                  bg='#28a745', fg='white', bd=0, font=('Segoe UI', 10, 'bold'),
+                  padx=15, pady=8, cursor='hand2').pack(side=tk.LEFT, padx=10)
+
+        # Detail Button
+        btn_detail = tk.Button(right_action,
                                text="📊 View Detailed Analysis Dashboard",
-                               font=('Arial', 12, 'bold'),
-                               bg='#1E90FF', fg='white', bd=0, padx=20, pady=10,
+                               font=('Arial', 11, 'bold'),
+                               bg='#1E90FF', fg='white', bd=0, padx=20, pady=8,
                                cursor='hand2',
                                command=self._open_detailed_dashboard)
-        btn_detail.pack(side=tk.RIGHT, padx=20, pady=10)
+        btn_detail.pack(side=tk.LEFT, padx=0)
 
     def _get_view_display_name(self):
         view_lower = self.view_type.lower()
@@ -129,19 +189,132 @@ class ResultsScreen(ttk.Frame):
         btn_frame = tk.Frame(header, bg='#1E1E1E')
         btn_frame.pack(side=tk.RIGHT, padx=20, fill=tk.Y)
 
-        tk.Button(btn_frame, text="🖼️ Export Images", command=self._export_images_to_results,
-                  bg='#FF9800', fg='white', bd=0, font=('Segoe UI', 10),
-                  padx=15, pady=8, cursor='hand2').pack(side=tk.RIGHT, padx=(5, 0), pady=20)
-
         tk.Button(btn_frame, text="← Back", command=self._back_to_upload,
                   bg='#444', fg='white', bd=0, font=('Segoe UI', 10),
                   padx=15, pady=8, cursor='hand2').pack(side=tk.RIGHT, padx=(5, 0), pady=20)
+
+    def _update_nav_buttons(self):
+        if not self.is_batch_view: return
+        
+        # Update Label
+        if hasattr(self, 'lbl_batch_status'):
+             self.lbl_batch_status.config(text=f"{self.current_batch_index + 1} / {len(self.batch_data)}")
+        
+        # Update Buttons
+        if hasattr(self, 'btn_prev'):
+            if self.current_batch_index <= 0:
+                self.btn_prev.config(state=tk.DISABLED, bg='#333')
+            else:
+                self.btn_prev.config(state=tk.NORMAL, bg='#555')
+            
+        if hasattr(self, 'btn_next'):
+            if self.current_batch_index >= len(self.batch_data) - 1:
+                self.btn_next.config(state=tk.DISABLED, bg='#333')
+            else:
+                self.btn_next.config(state=tk.NORMAL, bg='#1E90FF')
+
+    def _next_image(self):
+        if self.current_batch_index < len(self.batch_data) - 1:
+            self.current_batch_index += 1
+            self._reload_result()
+
+    def _prev_image(self):
+        if self.current_batch_index > 0:
+            self.current_batch_index -= 1
+            self._reload_result()
+
+    def _reload_result(self):
+        # Update current data
+        self.analysis_data = self.batch_data[self.current_batch_index]
+        self.view_type = self.analysis_data.get('view_type', 'anterior').lower()
+        
+        # Refresh Logic
+        self._update_nav_buttons()
+        
+        # Re-create layout title (Header)
+        # Hacky: Destroy everything and rebuild is simplest for dynamic header updates
+        for widget in self.main_container.winfo_children():
+            widget.destroy()
+            
+        self._create_header()
+        
+        self.content_frame = tk.Frame(self.main_container, bg='#121212')
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # Re-process visuals
+        self._process_and_display() 
+        
+        # Re-add detail button frame (Action Frame)
+        self.action_frame = tk.Frame(self.main_container, bg='#1E1E1E', height=80)
+        self.action_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=0, pady=0)
+        
+        self._update_action_bar()
 
     def _export_images_to_results(self):
         results_dir = "results"
         if not os.path.exists(results_dir):
             os.makedirs(results_dir)
 
+        # BATCH EXPORT LOGIC
+        if self.is_batch_view:
+            confirm = messagebox.askyesno("Batch Export", 
+                                        f"Export all {len(self.batch_data)} images in this batch?\n\nThis will save original, analyzed, and graph images for EACH result.",
+                                        icon='question')
+            if confirm:
+                # Create a specific folder for this batch export
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                batch_dir = os.path.join(results_dir, f"batch_export_{timestamp}")
+                if not os.path.exists(batch_dir):
+                    os.makedirs(batch_dir)
+                
+                # Show progress
+                progress_win = tk.Toplevel(self)
+                progress_win.title("Exporting...")
+                progress_win.geometry("300x150")
+                tk.Label(progress_win, text="Exporting Batch Results...", font=('Segoe UI', 10, 'bold')).pack(pady=20)
+                lbl_prog = tk.Label(progress_win, text="Initializing...")
+                lbl_prog.pack(pady=5)
+                progress_bar = ttk.Progressbar(progress_win, orient=tk.HORIZONTAL, length=250, mode='determinate')
+                progress_bar.pack(pady=10)
+                progress_win.update()
+                
+                success_count = 0
+                original_index = self.current_batch_index
+                
+                try:
+                    for i, data in enumerate(self.batch_data):
+                        lbl_prog.config(text=f"Processing {i+1}/{len(self.batch_data)}")
+                        progress_bar['value'] = (i / len(self.batch_data)) * 100
+                        progress_win.update()
+                        
+                        # Load data into context
+                        self.analysis_data = data
+                        self.view_type = self.analysis_data.get('view_type', 'anterior').lower()
+                        
+                        # GENERATE VISUALIZATIONS (Graphs & Processed Image)
+                        # We must call _process_and_display to generate the artifacts
+                        # Note: We don't need to rebuild the FULL UI, just the internal image/graph state
+                        # But simpler to just run the standard method
+                        self._process_and_display() 
+                        
+                        # Export
+                        self.export_batch_result(batch_dir)
+                        success_count += 1
+                        
+                    progress_win.destroy()
+                    messagebox.showinfo("Export Complete", f"Successfully exported {success_count} results to:\n{batch_dir}")
+                    
+                except Exception as e:
+                    progress_win.destroy()
+                    messagebox.showerror("Export Error", f"Error during batch export: {e}")
+                
+                finally:
+                    # Restore original view
+                    self.current_batch_index = original_index
+                    self._reload_result()
+                return
+
+        # SINGLE IMAGE EXPORT
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             exported_files = []
@@ -172,6 +345,175 @@ class ResultsScreen(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export images: {e}")
 
+    def export_batch_result(self, output_dir):
+        """Export result silently for batch processing"""
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        try:
+            # Use original filename as base if available
+            base_name = os.path.splitext(os.path.basename(self.analysis_data.get('image_path', 'image')))[0]
+            timestamp = datetime.now().strftime("%H%M%S")
+            
+            # Create a subfolder for this specific image result
+            img_result_dir = os.path.join(output_dir, f"{base_name}_analysis")
+            if not os.path.exists(img_result_dir):
+                os.makedirs(img_result_dir)
+
+            exported_paths = []
+
+            if self.original_image is not None:
+                original_filename = f"{base_name}_original.png"
+                original_path = os.path.join(img_result_dir, original_filename)
+                img_bgr = cv2.cvtColor(self.original_image, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(original_path, img_bgr)
+                exported_paths.append(original_path)
+
+            if self.processed_image is not None:
+                processed_filename = f"{base_name}_analyzed.png"
+                processed_path = os.path.join(img_result_dir, processed_filename)
+                img_bgr = cv2.cvtColor(self.processed_image, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(processed_path, img_bgr)
+                exported_paths.append(processed_path)
+
+            for idx, fig in enumerate(self.graph_figures):
+                graph_filename = f"{base_name}_graph_{idx+1}.png"
+                graph_path = os.path.join(img_result_dir, graph_filename)
+                fig.savefig(graph_path, dpi=150, bbox_inches='tight', facecolor='white')
+                exported_paths.append(graph_path)
+            
+            print(f"[SUCCESS] Batch Export Success: {base_name}")
+            return True, exported_paths
+            
+        except Exception as e:
+            print(f"[ERROR] Batch Export Error for {base_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, str(e)
+
+    def _export_batch_csv(self):
+        """Export batch results to CSV with specific formatting"""
+        if not self.is_batch_view or not self.batch_data:
+            messagebox.showwarning("Export Error", "No batch data available to export.")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export Batch Recap CSV",
+            initialfile=f"Batch_Recap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
+        
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
+                writer = csv.writer(f)
+                
+                # 1. Merged Header Row (Visual Grouping)
+                writer.writerow(['', '', '', 'Hasil Klasifikasi', '', '', ''])
+                
+                # 2. Main Header Row
+                headers = [
+                    'No',
+                    'Dataset ID',
+                    'Anotasi',
+                    'Citra arah depan',
+                    'Citra arah belakang',
+                    'Citra samping kanan',
+                    'Citra samping kiri'
+                ]
+                writer.writerow(headers)
+                
+                # 3. Data Rows
+                for i, data in enumerate(self.batch_data):
+                    # Extract Data
+                    image_path = data.get('image_path', '')
+                    
+                    # 1. Fix Dataset ID: Folder Name + Filename
+                    # Example: "Chinki 20250505_110301"
+                    try:
+                        folder_name = os.path.basename(os.path.dirname(image_path))
+                        file_name = os.path.splitext(os.path.basename(image_path))[0]
+                        dataset_id = f"{folder_name} {file_name}"
+                    except:
+                        dataset_id = os.path.basename(image_path)
+                    
+                    # 2. Determine Classification (Anotasi)
+                    # Parsing logic: "Kyphosis-Depan" -> "Kyphosis"
+                    classification = "Unknown"
+                    full_class_name = "Unknown"
+                    
+                    detections = data.get('detections', {})
+                    if detections and 'all_detections' in detections and len(detections['all_detections']) > 0:
+                        # Try to get 'classification' key first (usually e.g. "Kyphosis-Depan")
+                        # Fallback to 'sub_category'
+                        det = detections['all_detections'][0]
+                        full_class_name = det.get('classification', det.get('sub_category', 'Unknown'))
+                        
+                        # Clean up string (remove -Direction)
+                        if '-' in full_class_name:
+                             classification = full_class_name.split('-')[0]
+                        else:
+                             classification = full_class_name
+                             
+                    # Fallback: if Unknown, maybe check view_type from upload.py logic if it holds class info
+                    if classification == "Unknown" or classification == "":
+                        # Try to infer from raw view_type if strictly mapped
+                        vt = data.get('view_type', '')
+                        if 'normal' in vt.lower(): classification = 'Normal'
+                        elif 'kyphosis' in vt.lower(): classification = 'Kyphosis'
+                        elif 'lordosis' in vt.lower(): classification = 'Lordosis'
+                        elif 'swayback' in vt.lower(): classification = 'Swayback'
+                    
+                    # 3. Determine View Direction
+                    # Logic: Use the parsed class name (e.g. "Kyphosis") in the specific view column
+                    # Use "-" for others.
+                    
+                    view_type = data.get('view_type', 'unknown').lower()
+                    
+                    # Helper to clean view type checks
+                    # Note: view_type might be "Kyphosis-Depan" or just "front" depending on how it was processed
+                    # We check the full_class_name as well for direction just in case
+                    
+                    check_str = (view_type + " " + full_class_name).lower()
+                    
+                    is_front = 'front' in check_str or 'anterior' in check_str or 'depan' in check_str
+                    is_back = 'back' in check_str or 'posterior' in check_str or 'belakang' in check_str
+                    is_right = 'right' in check_str or 'kanan' in check_str
+                    is_left = 'left' in check_str or 'kiri' in check_str
+                    
+                    # Priority resolution if multiple detected (unlikely but safe)
+                    # If multiple flags, trust view_type more
+                    
+                    # Mapping to Columns
+                    # Column Logic: "Kyphosis" if matches view, else "-"
+                    
+                    val_front = classification if is_front else "-"
+                    val_back = classification if is_back else "-"
+                    val_right = classification if is_right else "-"
+                    val_left = classification if is_left else "-"
+                    
+                    row = [
+                        str(i + 1),
+                        dataset_id,
+                        classification,
+                        val_front,
+                        val_back,
+                        val_right,
+                        val_left
+                    ]
+                    
+                    writer.writerow(row)
+            
+            messagebox.showinfo("Export Success", f"Batch Recap exported successfully to:\n{file_path}")
+            
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export CSV: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
     def _process_and_display(self):
         original_img = self.analysis_data['image_rgb'].copy()
         self.original_image = original_img.copy()
@@ -179,7 +521,328 @@ class ResultsScreen(ttk.Frame):
         final_image = self._generate_comprehensive_visualization(original_img)
         self.processed_image = final_image.copy()
 
+        # Generate Graphs for Export (Headless)
+        self._generate_graphs()
+
         self._display_comparison(original_img, final_image)
+
+    def _generate_graphs(self):
+        """Generate Matplotlib figures for export without displaying them"""
+        try:
+            # Clear existing figures to prevent accumulation
+            for fig in self.graph_figures:
+                plt.close(fig)
+            self.graph_figures.clear()
+
+            if self._is_lateral():
+                self._generate_lateral_figures()
+            else:
+                self._generate_frontal_figures()
+        except Exception as e:
+            print(f"[ERROR] Error generating graphs: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _generate_lateral_figures(self):
+        # Re-implementation of graph logic for headless export
+        head_data = self.analysis_data.get('head', {})
+        
+        # Increased width/height for high-res export
+        fig = plt.figure(figsize=(10, 25), facecolor='white') # White background for export
+        self.graph_figures.append(fig)
+
+        def set_dynamic_xlim(ax, x_values, center=5, min_width=5):
+            max_dev = 0
+            if x_values:
+                max_dev = max([abs(x - center) for x in x_values])
+            limit = max(min_width, max_dev + 1)
+            ax.set_xlim(center - limit, center + limit)
+
+        lat_dists = self.analysis_data.get('lateral_distances', {})
+        keypoints = self.analysis_data.get('keypoints', {})
+        mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
+        
+        def get_dist(key, p1_name, p2_name):
+             val = lat_dists.get(key, 0)
+             if val == 0:
+                 k1 = keypoints.get(f'lateral_{p1_name}')
+                 k2 = keypoints.get(f'lateral_{p2_name}')
+                 if k1 and k2:
+                     val = np.sqrt((k1['x']-k2['x'])**2 + (k1['y']-k2['y'])**2) * mm_per_px
+             return val
+
+        m_ear_sh = get_dist('ear_to_shoulder_mm', 'ear', 'shoulder')
+        m_sh_pel = get_dist('shoulder_to_pelvic_mm', 'shoulder', 'pelvic_center')
+        m_pel_wd = get_dist('pelvic_width_mm', 'pelvic_back', 'pelvic_front')
+        
+        ke = keypoints.get('lateral_pelvic_center')
+        kf = keypoints.get('lateral_knee')
+        kg = keypoints.get('lateral_ankle')
+        
+        m_thigh = 0
+        if ke and kf:
+             m_thigh = np.sqrt((ke['x']-kf['x'])**2 + (ke['y']-kf['y'])**2) * mm_per_px
+             
+        m_shin = 0
+        if kf and kg:
+             m_shin = np.sqrt((kf['x']-kg['x'])**2 + (kf['y']-kg['y'])**2) * mm_per_px
+
+        # 1. HEAD
+        ax1 = fig.add_subplot(411, facecolor='white')
+        ax1.set_ylim(0, 10)
+        ax1.grid(True, alpha=0.3)
+        ax1.plot([5, 5], [2, 8], 'k--', linewidth=2, label='Vertical') 
+        
+        ka = self.analysis_data.get('keypoints', {}).get('lateral_ear')
+        kb = self.analysis_data.get('keypoints', {}).get('lateral_shoulder')
+        
+        a_x = 5
+        b_x = 5
+        if ka and kb:
+            shift_mm = (ka['x'] - kb['x']) * mm_per_px
+            scale = 1.0 / 60.0
+            a_x = 5 + (shift_mm * scale)
+        
+        ax1.plot([a_x, b_x], [7, 4], 'g-', linewidth=2, label='Alignment')
+        ax1.plot(a_x, 7, 'bo', markersize=10, label='A (Ear)')
+        ax1.plot(b_x, 4, 'ro', markersize=10, label='B (Shoulder)')
+        ax1.text(a_x + 0.2, 7, 'A', fontsize=12, fontweight='bold')
+        ax1.text(b_x + 0.2, 4, 'B', fontsize=12, fontweight='bold')
+        
+        mid_x_ab = (a_x + b_x) / 2
+        mid_y_ab = (7 + 4) / 2
+        ax1.text(mid_x_ab, mid_y_ab, f"{m_ear_sh:.1f}mm", 
+                color='#00AA00', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='white', edgecolor='green', alpha=0.7))
+        
+        set_dynamic_xlim(ax1, [a_x, b_x])
+        ax1.set_title('Head Analysis', fontsize=16, fontweight='bold', pad=10)
+        ax1.legend(loc='upper right')
+
+        # 2. SPINE
+        ax2 = fig.add_subplot(412, facecolor='white')
+        ax2.set_ylim(0, 10)
+        ax2.grid(True, alpha=0.3)
+        ax2.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Vertical')
+        
+        ke = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_center')
+        b_x = 5
+        e_x = 5
+        if kb and ke:
+            shift_mm = (kb['x'] - ke['x']) * mm_per_px
+            scale = 1.0 / 60.0
+            b_x = 5 + (shift_mm * scale)
+        
+        ax2.plot(b_x, 8, 'ro', markersize=10, label='B (Shoulder)')
+        ax2.plot(e_x, 3, 'go', markersize=10, label='E (Pelvic)')
+        ax2.plot([b_x, e_x], [8, 3], 'c-', linewidth=2, label='Alignment')
+        ax2.text(b_x + 0.2, 8, 'B', fontsize=12, fontweight='bold')
+        ax2.text(e_x + 0.2, 3, 'E', fontsize=12, fontweight='bold')
+        
+        mid_x_be = (b_x + e_x) / 2
+        mid_y_be = (8 + 3) / 2
+        ax2.text(mid_x_be, mid_y_be, f"{m_sh_pel:.1f}mm", 
+                color='cyan', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='black', edgecolor='none', alpha=0.7))
+        
+        set_dynamic_xlim(ax2, [b_x, e_x])
+        ax2.set_title('Spine Analysis', fontsize=16, fontweight='bold', pad=10)
+        ax2.legend(loc='upper right')
+
+        # 3. PELVIS
+        ax3 = fig.add_subplot(413, facecolor='white')
+        ax3.set_ylim(0, 10)
+        ax3.grid(True, alpha=0.3)
+        ax3.plot([2, 8], [5, 5], 'k--', linewidth=2, label='Horizontal')
+        
+        kc = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_back')
+        kd = self.analysis_data.get('keypoints', {}).get('lateral_pelvic_front')
+        
+        y_c = 5
+        y_d = 5
+        if kc and kd:
+            scale_y = 1.0 / 10.0
+            diff_graph = (kd['y'] - kc['y']) * mm_per_px * scale_y
+            y_c = 5 + diff_graph
+            
+        is_facing_right = 'right' in self.view_type.lower()
+        cx, dx = (3, 7) if is_facing_right else (7, 3) 
+
+        ax3.plot(cx, y_c, 'bo', markersize=10, label='C (Back)')
+        ax3.plot(dx, y_d, 'bo', markersize=10, label='D (Front)')
+        ax3.plot([cx, dx], [y_c, y_d], 'b-', linewidth=3, label='Pelvic Line')
+        ax3.text(cx, y_c + 0.5, 'C', fontsize=12, fontweight='bold')
+        ax3.text(dx, y_d + 0.5, 'D', fontsize=12, fontweight='bold')
+        
+        mid_x_cd = (cx + dx) / 2
+        mid_y_cd = (y_c + y_d) / 2
+        ax3.text(mid_x_cd, mid_y_cd, f"{m_pel_wd:.1f}mm", 
+                color='blue', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='white', edgecolor='blue', alpha=0.7))
+        
+        min_y, max_y = min(y_c, y_d), max(y_c, y_d)
+        ax3.set_ylim(min_y - 2, max_y + 2)
+        ax3.set_xlim(0, 10)
+        ax3.set_title('Pelvis Analysis', fontsize=16, fontweight='bold', pad=10)
+        ax3.legend(loc='upper right')
+
+        # 4. LEG
+        ax4 = fig.add_subplot(414, facecolor='white')
+        ax4.set_ylim(0, 10)
+        ax4.grid(True, alpha=0.3)
+        ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Plumb')
+        
+        e_x = 5
+        f_x = 5
+        g_x = 5
+        
+        if ke and kf and kg:
+             scale = 1.0 / 60.0 # 1 unit = 60mm
+             dx_ef = (kf['x'] - ke['x']) * mm_per_px
+             dx_eg = (kg['x'] - ke['x']) * mm_per_px
+             f_x = 5 + (dx_ef * scale)
+             g_x = 5 + (dx_eg * scale)
+
+        ax4.plot(e_x, 9, 'yo', markersize=10, label='E (Hip)')
+        ax4.plot(f_x, 5, 'yo', markersize=10, label='F (Knee)')
+        ax4.plot(g_x, 1, 'yo', markersize=10, label='G (Ankle)')
+        
+        ax4.plot([e_x, f_x], [9, 5], color='yellow', linewidth=3, linestyle='-', label='Thigh (E-F)')
+        ax4.plot([f_x, g_x], [5, 1], color='magenta', linewidth=3, linestyle='-', label='Shin (F-G)')
+        
+        ax4.text(e_x + 0.2, 9, 'E', fontsize=12, fontweight='bold')
+        ax4.text(f_x + 0.2, 5, 'F', fontsize=12, fontweight='bold')
+        ax4.text(g_x + 0.2, 1, 'G', fontsize=12, fontweight='bold')
+        
+        mid_x_ef = (e_x + f_x) / 2
+        mid_y_ef = (9 + 5) / 2
+        ax4.text(mid_x_ef, mid_y_ef, f"{m_thigh:.1f}mm", 
+                color='black', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='yellow', edgecolor='none', alpha=0.7))
+
+        mid_x_fg = (f_x + g_x) / 2
+        mid_y_fg = (5 + 1) / 2
+        ax4.text(mid_x_fg, mid_y_fg, f"{m_shin:.1f}mm", 
+                color='white', fontsize=10, fontweight='bold', ha='center',
+                bbox=dict(facecolor='magenta', edgecolor='black', alpha=0.7))
+        
+        set_dynamic_xlim(ax4, [e_x, f_x, g_x])
+        ax4.set_title('Leg Analysis', fontsize=16, fontweight='bold', pad=10)
+        ax4.legend(loc='upper right')
+        
+        plt.tight_layout()
+
+    def _generate_frontal_figures(self):
+        sh_data = self.analysis_data.get('shoulder', {})
+        hip_data = self.analysis_data.get('hip', {})
+        
+        shoulder_diff = sh_data.get('height_difference_mm', 0)
+        shoulder_angle = sh_data.get('slope_angle_deg', 0)
+        hip_diff = hip_data.get('height_difference_mm', 0)
+        hip_angle = hip_data.get('pelvic_tilt_angle', 0)
+
+        kp = self.analysis_data.get('keypoints', {})
+        mm_px = self.analysis_data.get('conversion_ratio', 0.25)
+        
+        rc = kp.get('right_hip')
+        re = kp.get('right_knee')
+        rg = kp.get('right_ankle')
+
+        ld = kp.get('left_hip')
+        lf = kp.get('left_knee')
+        lh = kp.get('left_ankle')
+
+        fig = plt.figure(figsize=(10, 18), facecolor='white')
+        self.graph_figures.append(fig)
+
+        # 1. SHOULDER
+        ax1 = fig.add_subplot(411, facecolor='white')
+        ax1.set_xlim(0, 10)
+        ax1.set_ylim(0, 10)
+        ax1.grid(True, alpha=0.3)
+        ax1.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Ref')
+        angle_rad = np.radians(shoulder_angle)
+        x_end = 8
+        y_end = 5 + (x_end - 5) * np.tan(angle_rad)
+        ax1.plot([2, x_end], [5, y_end], 'r-', linewidth=4, label=f'Shoulder: {shoulder_diff:.1f}mm')
+        ax1.set_title('SHOULDER ALIGNMENT', fontsize=16, fontweight='bold', pad=10)
+        ax1.legend(loc='lower right')
+
+        # 2. PELVIS
+        ax2 = fig.add_subplot(412, facecolor='white')
+        ax2.set_xlim(0, 10)
+        ax2.set_ylim(0, 10)
+        ax2.grid(True, alpha=0.3)
+        ax2.plot([2, 8], [5, 5], 'k-', linewidth=2, label='Ref')
+        hip_angle_rad = np.radians(hip_angle)
+        hip_x_end = 8
+        hip_y_end = 5 + (hip_x_end - 5) * np.tan(hip_angle_rad)
+        ax2.plot([2, hip_x_end], [5, hip_y_end], 'b-', linewidth=4, label=f'Pelvis: {hip_diff:.1f}mm')
+        ax2.set_title('PELVIS ALIGNMENT', fontsize=16, fontweight='bold', pad=10)
+        ax2.legend(loc='lower right')
+
+        # 3. RIGHT LEG
+        ax3 = fig.add_subplot(413, facecolor='white')
+        ax3.set_ylim(0, 10)
+        ax3.grid(True, alpha=0.3)
+        ax3.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
+        
+        c_x = 5
+        e_x = 5
+        g_x = 5
+        
+        if rc and re and rg:
+            scale = 1.0 / 120.0 
+            dx_ce = (re['x'] - rc['x']) * mm_px
+            dx_eg = (rg['x'] - rc['x']) * mm_px
+            e_x = 5 + (dx_ce * scale)
+            g_x = 5 + (dx_eg * scale)
+            
+        ax3.plot(c_x, 9, 'go', markersize=10, label='C (Hip)')
+        ax3.plot(e_x, 5, 'go', markersize=10, label='E (Knee)')
+        ax3.plot(g_x, 1, 'go', markersize=10, label='G (Ankle)')
+        ax3.plot([c_x, e_x], [9, 5], 'g-', linewidth=3, label='Alignment')
+        ax3.plot([e_x, g_x], [5, 1], 'g-', linewidth=3)
+        
+        def set_dynamic_xlim(ax, x_values, center=5, min_width=5):
+            max_dev = 0
+            if x_values:
+                max_dev = max([abs(x - center) for x in x_values])
+            limit = max(min_width, max_dev + 1)
+            ax.set_xlim(center - limit, center + limit)
+
+        set_dynamic_xlim(ax3, [c_x, e_x, g_x])
+        ax3.set_title('RIGHT LEG ALIGNMENT (C-E-G)', fontsize=16, fontweight='bold', pad=10)
+        ax3.legend(loc='lower right')
+
+        # 4. LEFT LEG
+        ax4 = fig.add_subplot(414, facecolor='white')
+        ax4.set_ylim(0, 10)
+        ax4.grid(True, alpha=0.3)
+        ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
+        
+        d_x = 5
+        f_x = 5
+        h_x = 5
+        
+        if ld and lf and lh:
+             scale = 1.0 / 120.0 
+             dx_df = (lf['x'] - ld['x']) * mm_px
+             dx_fh = (lh['x'] - ld['x']) * mm_px
+             f_x = 5 + (dx_df * scale)
+             h_x = 5 + (dx_fh * scale)
+             
+        ax4.plot(d_x, 9, 'mo', markersize=10, label='D (Hip)')
+        ax4.plot(f_x, 5, 'mo', markersize=10, label='F (Knee)')
+        ax4.plot(h_x, 1, 'mo', markersize=10, label='H (Ankle)')
+        ax4.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Alignment')
+        ax4.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
+        
+        set_dynamic_xlim(ax4, [d_x, f_x, h_x])
+        ax4.set_title('LEFT LEG ALIGNMENT (D-F-H)', fontsize=16, fontweight='bold', pad=10)
+        ax4.legend(loc='lower right')
+
+        plt.tight_layout()
 
     def _draw_plumb_line(self, img, keypoints_dict, bbox=None):
         h, w, _ = img.shape
@@ -236,10 +899,10 @@ class ResultsScreen(ttk.Frame):
         elif len(image.shape) == 3 and image.shape[2] == 3:
             img_vis = image.copy()
         else:
-            print(f"⚠️ Unexpected image shape: {image.shape}")
+            print(f"[WARNING] Unexpected image shape: {image.shape}")
             img_vis = image.copy()
 
-        print(f"🖼️ Image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
+        print(f"Image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
         
         import copy
         keypoints_dict = copy.deepcopy(self.analysis_data.get('keypoints', {}))
@@ -255,10 +918,29 @@ class ResultsScreen(ttk.Frame):
                 if bbox and person_bbox is None:
                     person_bbox = (int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2']))
 
+        # USE PRE-GENERATED SKELETON IMAGE IF AVAILABLE (ULTRALYTICS PLOT)
+        # SKIP for lateral view - Ultralytics shows all 17 COCO points which are ambiguous on side view
+        skeleton_img_b64 = self.analysis_data.get('skeleton_image')
+        if skeleton_img_b64 and not self._is_lateral():
+            try:
+                img_data = base64.b64decode(skeleton_img_b64)
+                nparr = np.frombuffer(img_data, np.uint8)
+                # Ultralytics plot() returns BGR
+                decoded_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if decoded_img is not None:
+                    # Convert BGR to RGB for internal processing
+                    img_vis = cv2.cvtColor(decoded_img, cv2.COLOR_BGR2RGB)
+                    h, w, _ = img_vis.shape
+                    print("Using Ultralytics pre-plotted skeleton image (FRONTAL)")
+            except Exception as e:
+                print(f"[WARNING] Failed to decode skeleton image: {e}")
+        elif self._is_lateral():
+            print(f"Skipping Ultralytics skeleton for LATERAL view - using custom skeleton")
+
         # Draw plumb line first (Removed per user request)
         # if keypoints_dict:
         #     img_vis, plumb_x = self._draw_plumb_line(img_vis, keypoints_dict, person_bbox)
-        #     print(f"✅ Plumb line drawn at x={plumb_x}")
+        #     print(f"[OK] Plumb line drawn at x={plumb_x}")
 
         # Draw detection bounding boxes (Only highest confidence to avoid ambiguity - Phase 38)
         if detections and 'all_detections' in detections and detections['all_detections']:
@@ -289,7 +971,7 @@ class ResultsScreen(ttk.Frame):
                 label = f"{disp_cls} {confidence:.1f}%"
                 cv2.putText(img_vis, label, (x1, y1-5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-                print(f"✅ Best BBox drawn: {cls_name} ({confidence:.1f}%)")
+                print(f"Best BBox drawn: {cls_name} ({confidence:.1f}%)")
 
         def is_in_bbox(pt, bbox):
             if bbox is None: return True
@@ -304,9 +986,10 @@ class ResultsScreen(ttk.Frame):
         mm_per_px = self.analysis_data.get('conversion_ratio', 0.25)
 
         # OFFSET CORRECTION (USER REQUEST): Shift E and G to the RIGHT
-        if not self._is_lateral() and keypoints_dict:
-             if 'right_knee' in keypoints_dict: keypoints_dict['right_knee']['x'] += 45
-             if 'right_ankle' in keypoints_dict: keypoints_dict['right_ankle']['x'] += 45
+        # Removed per user request to reduce ambiguity and maintain alignment withMarkers
+        # if not self._is_lateral() and keypoints_dict:
+        #      if 'right_knee' in keypoints_dict: keypoints_dict['right_knee']['x'] += 45
+        #      if 'right_ankle' in keypoints_dict: keypoints_dict['right_ankle']['x'] += 45
 
         if keypoints_dict and self._is_lateral():
             # LATERAL (SIDE): Multicolor skeleton with fail-safe distance calculation
@@ -482,6 +1165,8 @@ class ResultsScreen(ttk.Frame):
             if lh and lk and la and lh.get('visible') and lk.get('visible') and la.get('visible'):
                 pt_d, pt_f, pt_h = (int(lh['x']), int(lh['y'])), (int(lk['x']), int(lk['y'])), (int(la['x']), int(la['y']))
                 
+                pt_d, pt_f, pt_h = (int(lh['x']), int(lh['y'])), (int(lk['x']), int(lk['y'])), (int(la['x']), int(la['y']))
+                
                 # D-F segment
                 cv2.line(img_vis, pt_d, pt_f, (255, 0, 255), 3, cv2.LINE_AA)
                 dist_df = np.sqrt((pt_f[0]-pt_d[0])**2 + (pt_f[1]-pt_d[1])**2) * mm_per_px
@@ -542,9 +1227,10 @@ class ResultsScreen(ttk.Frame):
             if k and k.get('visible'):
                 pt = (int(k['x']), int(k['y']))
                 if is_in_bbox(pt, person_bbox):
-                    # Point Circle
-                    cv2.circle(img_vis, pt, 7, (255, 255, 255), -1, cv2.LINE_AA)
-                    cv2.circle(img_vis, pt, 4, (255, 100, 0) if 'lateral' in kp_name else (0, 100, 255), -1, cv2.LINE_AA)
+                    # Point Circle - HANDLED BY ULTRALYTICS PLOT
+                    if not skeleton_img_b64:
+                        cv2.circle(img_vis, pt, 7, (255, 255, 255), -1, cv2.LINE_AA)
+                        cv2.circle(img_vis, pt, 4, (255, 100, 0) if 'lateral' in kp_name else (0, 100, 255), -1, cv2.LINE_AA)
                     
                     # Label
                     if kp_name in labels_map:
@@ -575,9 +1261,9 @@ class ResultsScreen(ttk.Frame):
             
             # Perform crop
             img_vis = img_vis[y1:y2, x1:x2]
-            print(f"✂️ Cropped visualization to bbox: {x1},{y1},{x2},{y2}")
+            print(f"[CROP] Cropped visualization to bbox: {x1},{y1},{x2},{y2}")
 
-        print(f"🎨 Final image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
+        print(f"[INFO] Final image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
         print("=" * 60)
         
         return img_vis
@@ -1153,56 +1839,100 @@ class DetailedReportWindow(tk.Toplevel):
             # --- KEYPOINT STATUS ---
             tk.Label(m_frame, text="KEYPOINT STATUS", font=('Segoe UI', 11, 'bold'), bg='#121212', fg='#FFD700').pack(anchor='w', padx=20, pady=(0,10))
             
-            # Logic for comparisons
-            # A > B means X coordinate of A is greater than B
-            # C Higher than D means Y coordinate of C is smaller than D (image coordinates)
+            # Helper for signed shift (Forward = Positive, Backward = Negative)
+            def get_signed_shift(k_name):
+                k = keypoints.get(k_name)
+                if not k: return None
+                
+                plumb_x = self.analysis_data.get('posture_center_x', self.processed_image.shape[1] // 2)
+                is_facing_right = 'right' in self.view_type.lower()
+                
+                if is_facing_right:
+                    return (k['x'] - plumb_x) * mm_per_px
+                else:
+                    return (plumb_x - k['x']) * mm_per_px
+
+            def get_label(name, shift):
+                if shift is None: return name
+                
+                # User request: "A bukan -A", "B bukan -B", "E bukan -E"
+                # Only F and G should show negative sign if behind plumb line.
+                allowed_negative = ['F', 'G']
+                
+                if name in allowed_negative and shift < 0:
+                    return f"-{name}"
+                return name
             
-            statuses = []
+            # Dominance Logic:
+            # Strictly Algebraic: Forward (Positive) > Backward (Negative).
+            # "titik -F lebih besar dari titik -G" (-5 > -10).
+            def check_dominance(v1, v2):
+                if v1 is None or v2 is None: return False
+                return v1 > v2
+
+            status_items = []
+
+            s_a = get_signed_shift('lateral_ear')
+            s_b = get_signed_shift('lateral_shoulder')
+            s_c_y = keypoints.get('lateral_pelvic_back', {}).get('y')
+            s_d_y = keypoints.get('lateral_pelvic_front', {}).get('y')
+            s_e = get_signed_shift('lateral_pelvic_center')
+            s_f = get_signed_shift('lateral_knee')
+            s_g = get_signed_shift('lateral_ankle')
+
+            # Logic 1: A vs B
+            if s_a is not None and s_b is not None:
+                la, lb = get_label("A", s_a), get_label("B", s_b)
+                if check_dominance(s_a, s_b):
+                    status_items.append([(f"{la} ", "white"), (">", "green"), (f" {lb}", "white")])
+                else:
+                    status_items.append([(f"{la} ", "white"), ("<", "red"), (f" {lb}", "white")])
+
+            # Logic 2: B vs E
+            if s_b is not None and s_e is not None:
+                lb, le = get_label("B", s_b), get_label("E", s_e)
+                if check_dominance(s_b, s_e):
+                    status_items.append([(f"{lb} ", "white"), (">", "green"), (f" {le}", "white")])
+                else:
+                    status_items.append([(f"{lb} ", "white"), ("<", "red"), (f" {le}", "white")])
+
+            # Logic 3: C vs D (Height) - Specific Logic (Higher is Green)
+            if s_c_y is not None and s_d_y is not None:
+                # Lower Y is Higher in image
+                if s_c_y < s_d_y: 
+                    status_items.append([("C Higher than D", "green")])
+                else:
+                    status_items.append([("D Higher than C", "red")])
+
+            # Logic 4: E vs F
+            if s_e is not None and s_f is not None:
+                le, lf = get_label("E", s_e), get_label("F", s_f)
+                if check_dominance(s_e, s_f):
+                    status_items.append([(f"{le} ", "white"), (">", "green"), (f" {lf}", "white")])
+                else:
+                    status_items.append([(f"{le} ", "white"), ("<", "red"), (f" {lf}", "white")])
+
+            # Logic 5: F vs G
+            if s_f is not None and s_g is not None:
+                lf, lg = get_label("F", s_f), get_label("G", s_g)
+                if check_dominance(s_f, s_g):
+                    status_items.append([(f"{lf} ", "white"), (">", "green"), (f" {lg}", "white")])
+                else:
+                    status_items.append([(f"{lf} ", "white"), ("<", "red"), (f" {lg}", "white")])
+
+
+            # Display items
+            status_frame = tk.Frame(m_frame, bg='#121212')
+            status_frame.pack(anchor='w', padx=30, pady=5)
             
-            def check_x(k1_name, l1, k2_name, l2):
-                k1 = keypoints.get(k1_name)
-                k2 = keypoints.get(k2_name)
-                if k1 and k2:
-                    if k1['x'] > k2['x']: return f"{l1} > {l2}"
-                    elif k1['x'] < k2['x']: return f"{l1} < {l2}"
-                    else: return f"{l1} = {l2}"
-                return None
+            for i, segments in enumerate(status_items):
+                if i > 0:
+                    tk.Label(status_frame, text=", ", font=('Segoe UI', 12, 'bold'), bg='#121212', fg='white').pack(side=tk.LEFT)
+                
+                for text, color in segments:
+                    tk.Label(status_frame, text=text, font=('Segoe UI', 12, 'bold'), 
+                             bg='#121212', fg=color).pack(side=tk.LEFT)
 
-            def check_y_height(k1_name, l1, k2_name, l2):
-                k1 = keypoints.get(k1_name)
-                k2 = keypoints.get(k2_name)
-                if k1 and k2:
-                    if k1['y'] < k2['y']: return f"{l1} Higher than {l2}"
-                    elif k2['y'] < k1['y']: return f"{l2} Higher than {l1}"
-                    else: return f"{l1} same height as {l2}"
-                return None
-
-            # 1) A vs B (Ear vs Shoulder)
-            s_ab = check_x('lateral_ear', 'A', 'lateral_shoulder', 'B')
-            if s_ab: statuses.append(s_ab)
-
-            # 2) B vs E (Shoulder vs Pelvic Center)
-            s_be = check_x('lateral_shoulder', 'B', 'lateral_pelvic_center', 'E')
-            if s_be: statuses.append(s_be)
-            
-            # 3) E vs F (Pelvic Center vs Knee)
-            s_ef = check_x('lateral_pelvic_center', 'E', 'lateral_knee', 'F')
-            if s_ef: statuses.append(s_ef)
-
-            # 4) F vs G (Knee vs Ankle)
-            s_fg = check_x('lateral_knee', 'F', 'lateral_ankle', 'G')
-            if s_fg: statuses.append(s_fg)
-
-            # 5) C vs D (Pelvic Back vs Pelvic Front) - Height
-            s_cd = check_y_height('lateral_pelvic_back', 'C', 'lateral_pelvic_front', 'D')
-            if s_cd: statuses.append(s_cd)
-
-            full_status = ", ".join(statuses)
-            
-            status_text = f"{full_status}"
-            
-            tk.Label(m_frame, text=status_text, font=('Segoe UI', 10, 'bold'), 
-                     bg='#121212', fg='white', justify='left', wraplength=500).pack(anchor='w', padx=30, pady=5)
 
     def _add_detail_row(self, parent, label, value):
         f = tk.Frame(parent, bg='#121212')

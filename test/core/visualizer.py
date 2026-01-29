@@ -122,3 +122,76 @@ def visualize_just_imbalance(image, analysis_results):
                    (le_x - 50, le_y - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
     return img_copy
+
+
+def visualize_skeleton_custom(image, keypoints_dict):
+    """
+    Draw skeleton using the PROCESSED keypoints dict (with snapped/adjusted points).
+    This ensures the visualization matches the analysis logic.
+    """
+    # Work on a copy
+    img_vis = image.copy()
+    if len(img_vis.shape) == 2:
+        img_vis = cv2.cvtColor(img_vis, cv2.COLOR_GRAY2BGR)
+        
+    # 1. DEFINE CONNECTIONS
+    # Frontal (Anterior)
+    frontal_connections = [
+        ('left_shoulder', 'right_shoulder'),
+        ('left_shoulder', 'left_elbow'), ('left_elbow', 'left_wrist'), # Arms
+        ('right_shoulder', 'right_elbow'), ('right_elbow', 'right_wrist'),
+        ('left_shoulder', 'left_hip'), ('right_shoulder', 'right_hip'), # Torso
+        ('left_hip', 'right_hip'),
+        ('left_hip', 'left_knee'), ('left_knee', 'left_ankle'), # Legs
+        ('right_hip', 'right_knee'), ('right_knee', 'right_ankle')
+    ]
+    
+    # Lateral (Side)
+    lateral_connections = [
+        ('lateral_ear', 'lateral_shoulder'),
+        ('lateral_shoulder', 'lateral_pelvic_center'), # Spine axis
+        ('lateral_pelvic_center', 'lateral_knee'),
+        ('lateral_knee', 'lateral_ankle'),
+        ('lateral_pelvic_back', 'lateral_pelvic_front') # Pelvic Tilt line
+    ]
+    
+    # 2. DRAW LINES
+    connections = frontal_connections + lateral_connections
+    
+    for start_k, end_k in connections:
+        pt1 = keypoints_dict.get(start_k)
+        pt2 = keypoints_dict.get(end_k)
+        
+        if pt1 and pt2 and pt1.get('visible') and pt2.get('visible'):
+            p1 = (int(pt1['x']), int(pt1['y']))
+            p2 = (int(pt2['x']), int(pt2['y']))
+            
+            # Color: Cyan for Lateral, Magenta/Cyan mix for Frontal to match user style
+            color = (255, 255, 0) # Cyan-ish default
+            if 'lateral' in start_k:
+                 color = (255, 0, 255) # Magenta for lateral
+            
+            cv2.line(img_vis, p1, p2, color, 2)
+            
+    # 3. DRAW POINTS
+    for k, pt in keypoints_dict.items():
+        if pt and pt.get('visible') and 'x' in pt:
+            x, y = int(pt['x']), int(pt['y'])
+            
+            # Color: Green dots
+            cv2.circle(img_vis, (x, y), 5, (0, 255, 0), -1)
+            
+            # Label specific points for debug? (Optional)
+            if k in ['left_knee', 'lateral_knee']:
+                cv2.putText(img_vis, "F", (x+10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+    # 4. DRAW DEBUG WARNINGS
+    if 'debug_warnings' in keypoints_dict:
+        warnings = keypoints_dict['debug_warnings']
+        y_off = 30
+        for w in warnings:
+            cv2.putText(img_vis, f"OUT OF BOUNDS: {w}", (10, y_off), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            y_off += 25
+            
+    return img_vis

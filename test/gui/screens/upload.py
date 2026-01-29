@@ -7,6 +7,7 @@ import threading
 import sys
 import warnings
 import glob
+from datetime import datetime
 
 warnings.filterwarnings('ignore')
 
@@ -31,18 +32,38 @@ class UploadScreen(ttk.Frame):
         self.confidence_threshold = 0.25
         self.current_keypoints = None
         self.api_connected = False
+        
+        # New: Auto Run Variable
+        self.auto_run_var = tk.BooleanVar(value=False)
 
         self._setup_styles()
         self._create_widgets()
         self._check_api_health()
-
-
+        
     def _setup_styles(self):
         style = ttk.Style()
         style.configure('Black.TFrame', background='#000000')
-        
+        style.configure('Black.TCheckbutton', background='#000000', foreground='#FFFFFF', font=('Arial', 10))
         
     def _on_canvas_resize(self, event):
+        """Handle canvas resize event"""
+        if hasattr(self, 'image_path') and self.image_path:
+            # Trigger re-centering of image
+            self._display_preview(self.image_path)
+
+    def _create_widgets(self):
+        main_container = tk.Frame(self, bg='#000000')
+        main_container.pack(fill=tk.BOTH, expand=True)
+
+        # Header dengan logo dan title
+        header = tk.Frame(main_container, bg='#000000', height=80)
+        header.pack(fill=tk.X, padx=40, pady=(10, 5))
+        
+        # ... (Rest of header code skipped for brevity, keeping surrounding context) ...
+        # (Wait, I need to insert the checkbox near the button, which is further down in _create_widgets)
+        # I will split this into two edits to be safe.
+        # First edit: Add initialization and style.
+
         """Handle canvas resize event"""
         if hasattr(self, 'image_path') and self.image_path:
             # Trigger re-centering of image
@@ -242,6 +263,14 @@ class UploadScreen(ttk.Frame):
         analyze_button_container = tk.Frame(content_frame, bg='#000000')
         analyze_button_container.pack(pady=(5, 0))  # Kurangi pady
         
+        # Checkbox Auto-Run
+        self.auto_run_checkbox = ttk.Checkbutton(analyze_button_container,
+                                               text="Auto-Analyze Batch",
+                                               variable=self.auto_run_var,
+                                               style='Black.TCheckbutton',
+                                               command=self._on_auto_run_toggle)
+        self.auto_run_checkbox.pack(pady=(0, 5))
+        
         # Analyze Button - DI TENGAH BAWAH
         self.analyze_button = tk.Button(analyze_button_container,
                                     text="🔍 ANALYZE POSTURE",
@@ -265,6 +294,13 @@ class UploadScreen(ttk.Frame):
         # Update status
         if self.image_path:
             self.status_label.config(text=f"Confidence: {self.confidence_threshold:.2f} | Ready to analyze")
+
+    def _on_auto_run_toggle(self):
+        """Handle auto run toggle"""
+        if self.auto_run_var.get():
+            self.status_label.config(text="Auto-Run Enabled: Will analyze all remaining images.")
+        else:
+            self.status_label.config(text="Auto-Run Disabled: Manual analysis.")
 
     def _upload_model_dialog(self):
         file_path = filedialog.askopenfilename(
@@ -417,8 +453,8 @@ class UploadScreen(ttk.Frame):
             if canvas_height < 100:
                 canvas_height = 600
             
-            print(f"🖼️ Image size: {original_width}x{original_height}")
-            print(f"🎨 Canvas size: {canvas_width}x{canvas_height}")
+            print(f"Image size: {original_width}x{original_height}")
+            print(f"Canvas size: {canvas_width}x{canvas_height}")
             
             # STRATEGI OPTIMASI BARU: Prioritaskan kejelasan gambar
             # 1. Hitung rasio canvas terhadap gambar
@@ -468,8 +504,8 @@ class UploadScreen(ttk.Frame):
             new_width = int(original_width * scale_factor)
             new_height = int(original_height * scale_factor)
             
-            print(f"📏 Scale factor: {scale_factor:.2f}")
-            print(f"📐 New size: {new_width}x{new_height}")
+            print(f"Scale factor: {scale_factor:.2f}")
+            print(f"New size: {new_width}x{new_height}")
             
             # 6. Jika hasil resize terlalu besar untuk canvas, adjust
             if new_width > canvas_width or new_height > canvas_height:
@@ -480,7 +516,7 @@ class UploadScreen(ttk.Frame):
                 new_width = int(new_width * adjust_factor)
                 new_height = int(new_height * adjust_factor)
                 scale_factor *= adjust_factor
-                print(f"📐 Adjusted size: {new_width}x{new_height}")
+                print(f"Adjusted size: {new_width}x{new_height}")
             
             # 7. Gunakan metode resize yang optimal berdasarkan ukuran
             if scale_factor > 1.0:
@@ -701,15 +737,27 @@ class UploadScreen(ttk.Frame):
         
         if folder_path:
             image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff', '*.webp']
-            self.batch_images = []
+            
+            # Use set to avoid duplicates (Windows glob is case-insensitive, causing double counts)
+            unique_images = set()
             
             for ext in image_extensions:
-                self.batch_images.extend(glob.glob(os.path.join(folder_path, ext)))
-                self.batch_images.extend(glob.glob(os.path.join(folder_path, ext.upper())))
+                # Add lowercase matches
+                matches = glob.glob(os.path.join(folder_path, ext))
+                for m in matches:
+                    unique_images.add(os.path.abspath(m))
+                
+                # Add uppercase matches (Redundant on Windows but needed for Linux/strict case)
+                matches_upper = glob.glob(os.path.join(folder_path, ext.upper()))
+                for m in matches_upper:
+                    unique_images.add(os.path.abspath(m))
+            
+            self.batch_images = sorted(list(unique_images))
             
             if self.batch_images:
                 self.analysis_mode = 'batch'
                 self.current_batch_index = 0
+                self.batch_results_list = []  # Initialize list to store all results
                 self.image_path = self.batch_images[0]
                 self._display_preview(self.image_path)
                 
@@ -950,16 +998,35 @@ class UploadScreen(ttk.Frame):
             self._display_preview(self.image_path)
         
         if self.analysis_mode == 'batch':
+            # Append current result to list
+            self.batch_results_list.append(analysis_results)
+
+            # Save/Export Result Automatically - DISABLED (User Request: Manual only)
+            # folder_name = os.path.basename(os.path.dirname(self.batch_images[0])) if self.batch_images else "batch_results"
+            # batch_export_dir = os.path.join("results", f"batch_{folder_name}_{datetime.now().strftime('%Y%m%d')}")
+            # self._perform_batch_export(analysis_results, batch_export_dir)
+
             self.current_batch_index += 1
             if self.current_batch_index < len(self.batch_images):
                 self.analyze_button.config(state=tk.NORMAL, text=f"🔍 ANALYZE BATCH ({self.current_batch_index + 1}/{len(self.batch_images)})")
                 self.status_label.config(text=f"✅ Completed {self.current_batch_index}/{len(self.batch_images)} images")
                 self.image_path = self.batch_images[self.current_batch_index]
                 self._display_preview(self.image_path)
+                
+                # AUTO-RUN LOGIC
+                if self.auto_run_var.get():
+                    self.status_label.config(text=f"🔄 Auto-analyzing {self.current_batch_index + 1}/{len(self.batch_images)}...")
+                    self.parent.after(500, self._analyze_image)
                 return
             else:
+                self.analyzing = False
+                self.status_label.config(text=f"✅ Batch Complete: All {len(self.batch_images)} images processed!")
                 messagebox.showinfo("Batch Complete", f"✅ All {len(self.batch_images)} images analyzed!")
                 self.analyze_button.config(text="🔍 ANALYZE POSTURE")
+                
+                # PASS FULL BATCH LIST TO RESULTS SCREEN
+                self.app.show_results_screen(self.batch_results_list)
+                return
         
         self.analyze_button.config(state=tk.NORMAL, text="🔍 ANALYZE POSTURE")
         self.status_label.config(text="✅ Analysis complete! Showing results...")
@@ -970,3 +1037,40 @@ class UploadScreen(ttk.Frame):
         self.analyze_button.config(state=tk.NORMAL, text="🔍 ANALYZE POSTURE")
         self.status_label.config(text="❌ Analysis failed - Please try again")
         messagebox.showerror("Analysis Error", f"Failed to analyze image:\n{error_message}")
+
+    def _perform_batch_export(self, analysis_results, output_dir):
+        """Helper to run the export logic using ResultsScreen logic without showing it"""
+        try:
+            # We need to temporarily create the ResultsScreen to use its logic
+            # But we don't pack it into the UI
+            from gui.screens.results import ResultsScreen
+            
+            # Mock app.analysis_data since ResultsScreen uses it from app
+            original_data = self.app.analysis_data
+            self.app.analysis_data = analysis_results
+            
+            # Create hidden results screen
+            # We use a Toplevel window that is withdrawn (hidden) as parent to avoid interfering with current layout
+            hidden_window = tk.Toplevel(self.parent)
+            hidden_window.withdraw()
+            
+            exporter = ResultsScreen(hidden_window, self.app)
+            
+            # Trigger export
+            success, msg = exporter.export_batch_result(output_dir)
+            
+            if success:
+                print(f"Exported: {msg}")
+            else:
+                print(f"Export failed: {msg}")
+                
+            # Cleanup
+            hidden_window.destroy()
+            
+            # Restore app data
+            self.app.analysis_data = original_data
+            
+        except Exception as e:
+            print(f"Batch export validation error: {e}")
+            import traceback
+            traceback.print_exc()

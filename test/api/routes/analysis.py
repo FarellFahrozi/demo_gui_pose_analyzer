@@ -5,6 +5,8 @@ import os
 import uuid
 from datetime import datetime
 import shutil
+import tempfile
+
 
 from api.models.schemas import (
     AnalysisResponse,
@@ -28,8 +30,8 @@ async def analyze_posture(
     height_cm: float = Form(...),
     confidence_threshold: float = Form(0.25)
 ):
-    upload_folder = "uploads"
-    os.makedirs(upload_folder, exist_ok=True)
+    upload_folder = tempfile.gettempdir()
+
 
     file_id = str(uuid.uuid4())
     file_extension = os.path.splitext(image.filename)[1]
@@ -71,7 +73,8 @@ async def analyze_posture(
             detections=analysis_data.get("detections"),
             keypoints=analysis_data.get("keypoints"),
             conversion_ratio=analysis_data.get("conversion_ratio"),
-            actual_height_mm=analysis_data.get("actual_height_mm")
+            actual_height_mm=analysis_data.get("actual_height_mm"),
+            skeleton_image=analysis_data.get("skeleton_image")
         )
 
         return AnalysisResponse(
@@ -134,8 +137,8 @@ async def batch_analyze_postures(
     height_cm: float = Form(...),
     confidence_threshold: float = Form(0.25)
 ):
-    upload_folder = "uploads"
-    os.makedirs(upload_folder, exist_ok=True)
+    upload_folder = tempfile.gettempdir()
+
 
     results = []
     temp_files = []

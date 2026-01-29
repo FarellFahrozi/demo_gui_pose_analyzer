@@ -7,12 +7,12 @@ from gui.main_gui import PostureAnalysisApp
 
 if __name__ == "__main__":
     print("""
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                                                              ║
-    ║     KURO PERFORMANCE POSTURAL ASSESSMENT                    ║
-    ║     Desktop Application                                      ║
-    ║                                                              ║
-    ╚══════════════════════════════════════════════════════════════╝
+    ==============================================================
+                                                              
+         KURO PERFORMANCE POSTURAL ASSESSMENT                    
+         Desktop Application                                      
+                                                              
+    ==============================================================
 
     Starting GUI application...
     """)

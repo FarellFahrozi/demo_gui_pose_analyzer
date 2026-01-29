@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import os
 from typing import Dict, Optional
 import sys
+import base64
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from core import AdvancedPoseAnalyzer
@@ -56,9 +57,25 @@ class PostureAnalyzerService:
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         results = self._model(image_path, conf=confidence_threshold, verbose=False, device='cpu')
-
+        
+        
+        # 1. EXTRACT KEYPOINTS FIRST (so we can visualize the Adjusted ones)
         analyzer = AdvancedPoseAnalyzer()
         keypoints = analyzer.extract_keypoints_from_results(results)
+
+        # 2. GENERATE CUSTOM VISUALIZATION
+        # Import visualizer here to avoid circular imports if necessary, or at top
+        from core.visualizer import visualize_skeleton_custom
+        
+        # Use a copy of the original image
+        plotted_img = visualize_skeleton_custom(img_rgb, keypoints)
+        
+        # BACK TO BGR for encoding (cv2 uses BGR)
+        plotted_img_bgr = cv2.cvtColor(plotted_img, cv2.COLOR_RGB2BGR)
+        
+        # Encode to Base64
+        _, buffer = cv2.imencode('.jpg', plotted_img_bgr)
+        skeleton_image_b64 = base64.b64encode(buffer).decode('utf-8')
 
         person_height_px = analyzer.estimate_person_height_from_keypoints(keypoints)
         if person_height_px is None:
@@ -88,7 +105,9 @@ class PostureAnalyzerService:
             'head': head_analysis,
             'lateral_distances': lateral_distances,
             'leg_anterior': leg_analysis_anterior,
-            'leg_lateral': leg_analysis_lateral
+            'leg_anterior': leg_analysis_anterior,
+            'leg_lateral': leg_analysis_lateral,
+            'skeleton_image': skeleton_image_b64
         }
 
         postural_angles = analyzer.analyze_postural_angles(keypoints)

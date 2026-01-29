@@ -19,13 +19,15 @@ class AdvancedPoseAnalyzer:
         }
         
         # Lateral mappings: Model indices differ based on orientation
+        # Kuro model uses custom indices
+        # Based on testing: 0=ear, 1=shoulder, 2=hip, 3=ankle, 7=knee (approx)
         self.LATERAL_LEFT_MAPPING = {
-            'ear': 0, 'shoulder': 1, 'pelvic_back': 9, 'pelvic_front': 2,
-            'pelvic_center': 2, 'knee': 3, 'ankle': 4
+            'ear': 0, 'shoulder': 1, 'pelvic_back': 2, 'pelvic_front': 2,
+            'knee': 7, 'ankle': 3  # Fixed: knee at index 7
         }
         self.LATERAL_RIGHT_MAPPING = {
-            'ear': 0, 'shoulder': 1, 'pelvic_back': 6, 'pelvic_front': 2,
-            'pelvic_center': 2, 'knee': 3, 'ankle': 4
+            'ear': 0, 'shoulder': 1, 'pelvic_back': 2, 'pelvic_front': 2,
+            'knee': 3, 'ankle': 4
         }
         self.LATERAL_MAPPING = self.LATERAL_LEFT_MAPPING # Default
         self.keypoint_mapping = self.ANTERIOR_MAPPING
@@ -125,6 +127,10 @@ class AdvancedPoseAnalyzer:
                     available = list(points)
                     assigned_widths = []
                     
+                    # Maximum horizontal distance from center (as fraction of bbox width)
+                    bbox_width = bx2 - bx1
+                    max_h_dist = bbox_width * 0.35  # Max 35% from center (relaxed to accept more candidates)
+                    
                     # Define Anatomical Targets (Vertical Percentages of BBox)
                     targets = [
                         ('shoulder', 0.18),
@@ -144,19 +150,20 @@ class AdvancedPoseAnalyzer:
                             # STRICT Vertical constraint (Phase 33: tightened from 0.15 to 0.12)
                             if v_dist > 0.12: continue
                             
-                            # HARD Horizontal constraint (Strict Symmetry - Phase 33)
+                            # HARD Horizontal constraint - distance from center
                             h_dist = abs(p['x'] - bcx)
+                            
+                            # REJECT if too far from center (prevents points outside body)
+                            if h_dist > max_h_dist: continue
                             
                             # Base score uses vertical distance
                             # Add CONFIDENCE PENALTY (Phase 35: Boosted Weight)
-                            # We want to prefer high-confidence points even if they are slightly off-target vertically
-                            # Weight: 0.50 means a 100% confidence difference is worth 50% vertical distance
                             c_penalty = (1.0 - p['conf']) * 0.50
                             
                             if ref_width is not None:
-                                h_dev = abs(h_dist - ref_width) / (bx2 - bx1)
-                                # HARD REJECT if deviation > 40% (Relaxed - Phase 35)
-                                if h_dev > 0.40: continue
+                                h_dev = abs(h_dist - ref_width) / bbox_width
+                                # HARD REJECT if deviation > 30% (Tightened from 40%)
+                                if h_dev > 0.30: continue
                                 score = v_dist + h_dev * 1.0 + c_penalty
                             else:
                                 score = v_dist + c_penalty
@@ -167,11 +174,15 @@ class AdvancedPoseAnalyzer:
                         
                         if best_p_idx != -1:
                             best_p = available.pop(best_p_idx)
+                            # CLAMP X to be within body bounds (12% margin from bbox edges)
+                            margin = bbox_width * 0.12
+                            clamped_x = max(bx1 + margin, min(best_p['x'], bx2 - margin))
+                            
                             keypoints_dict[f"{side_prefix}_{role}"] = {
-                                'x': float(best_p['x']), 'y': float(best_p['y']),
+                                'x': float(clamped_x), 'y': float(best_p['y']),
                                 'confidence': float(best_p['conf']), 'visible': True
                             }
-                            assigned_widths.append(abs(best_p['x'] - bcx))
+                            assigned_widths.append(abs(clamped_x - bcx))
                     
                     return np.mean(assigned_widths) if assigned_widths else 0
 
@@ -186,7 +197,60 @@ class AdvancedPoseAnalyzer:
                     w_ref = assign_roles_with_symmetry(left_col, 'right')
                     assign_roles_with_symmetry(right_col, 'left', ref_width=w_ref)
                 
-                self._debug_print(f"📐 SYMM-ASSIGN: RefWidth={w_ref:.1f}px (Back={is_back_view})")
+                self._debug_print(f"[SYMM-ASSIGN] RefWidth={w_ref:.1f}px (Back={is_back_view})")
+                
+                # =========================================================
+                # RIGHT-SIDE BASED CLAMPING - Use only right side (which is usually correct)
+                # to determine body bounds and force left side to mirror
+                # =========================================================
+                
+                # Get right side keypoints (they are usually detected correctly)
+                r_shoulder = keypoints_dict.get('right_shoulder')
+                r_hip = keypoints_dict.get('right_hip')
+                r_knee = keypoints_dict.get('right_knee')
+                r_ankle = keypoints_dict.get('right_ankle')
+                
+                # Calculate body center using ONLY reliable right side + bbox center
+                if r_shoulder and r_shoulder.get('visible') and r_hip and r_hip.get('visible'):
+                    # Right side is to the LEFT of bbox center in frontal view
+                    right_side_x = (r_shoulder['x'] + r_hip['x']) / 2
+                    
+                    # Estimate body center as: right_side_x is to left of center
+                    # So body_center = right_side_x + half_body_width
+                    # Assume typical half_body_width based on distance from right_side to bcx
+                    dist_to_center = bcx - right_side_x
+                    
+                    # Body center should be roughly at bcx, half_width is dist_to_center
+                    body_center_x = bcx
+                    max_half_width = abs(dist_to_center) * 1.2  # Add 20% margin
+                    
+                    # Force LEFT side keypoints to be within mirror bounds
+                    pairs = [
+                        ('right_shoulder', 'left_shoulder'),
+                        ('right_hip', 'left_hip'),
+                        ('right_knee', 'left_knee'),
+                        ('right_ankle', 'left_ankle')
+                    ]
+                    
+                    for right_key, left_key in pairs:
+                        r_pt = keypoints_dict.get(right_key)
+                        l_pt = keypoints_dict.get(left_key)
+                        
+                        if r_pt and r_pt.get('visible') and l_pt and l_pt.get('visible'):
+                            # Right point distance from center (negative = left of center)
+                            r_dist = r_pt['x'] - body_center_x
+                            
+                            # Left point SHOULD be at mirror position (opposite side of center)
+                            expected_l_x = body_center_x - r_dist  # Mirror
+                            
+                            # Bounds for left side
+                            min_l_x = body_center_x - max_half_width  # Min (left bound)
+                            max_l_x = body_center_x + max_half_width  # Max (right bound)
+                            
+                            # Check if left point is outside bounds (either direction)
+                            if l_pt['x'] < min_l_x or l_pt['x'] > max_l_x:
+                                l_pt['x'] = float(expected_l_x)  # Use mirror position
+                                self._debug_print(f"[MIRROR FIX] {left_key} moved to mirror {right_key}")
 
         except Exception as e:
             print(f"Geometric role assignment error: {e}")
@@ -197,73 +261,42 @@ class AdvancedPoseAnalyzer:
         # RECONSTRUCTION & STABILIZATION (Phase 36 - Robust Fix)
         # =========================================================
         self._enforce_anatomical_completeness(keypoints_dict)
-
-        # =========================================================
-        # NORMAL VIEW MANUAL ADJUSTMENTS (User Request - Fine Tuning)
-        # =========================================================
-        # Apply specific shifts if the detected class is 'Normal' (Frontal)
-        try:
-            is_normal_view = False
-            is_swayback_view = False
-            for result in results:
-                if hasattr(result, 'boxes'):
-                    for cls_idx in result.boxes.cls:
-                        class_name = result.names.get(int(cls_idx.item()), "").lower()
-                        if 'normal' in class_name and not any(k in class_name for k in ['lateral', 'samping', 'back', 'belakang']):
-                            is_normal_view = True
-                        if 'swayback' in class_name and not any(k in class_name for k in ['lateral', 'samping', 'back', 'belakang']):
-                            is_swayback_view = True
-                            break
-            
-            if is_normal_view:
-                self._debug_print("Applying 'Normal' view manual adjustments")
-                # G: Right Ankle (Screen Left) -> Down (+Y)
-                if keypoints_dict.get('right_ankle') and keypoints_dict['right_ankle']['visible']:
-                    keypoints_dict['right_ankle']['y'] += 20
-                
-                # H: Left Ankle (Screen Right) -> Down (+Y)
-                if keypoints_dict.get('left_ankle') and keypoints_dict['left_ankle']['visible']:
-                    keypoints_dict['left_ankle']['y'] += 20
-                
-                # E: Right Knee (Screen Left) -> Right (+X)
-                if keypoints_dict.get('right_knee') and keypoints_dict['right_knee']['visible']:
-                    keypoints_dict['right_knee']['x'] += 15 # Increased slightly
-                
-                # F: Left Knee (Screen Right) -> Left (-X)
-                if keypoints_dict.get('left_knee') and keypoints_dict['left_knee']['visible']:
-                    keypoints_dict['left_knee']['x'] -= 15 # Increased slightly
-                
-                # D: Left Hip (Screen Right) -> Left (-X)
-                if keypoints_dict.get('left_hip') and keypoints_dict['left_hip']['visible']:
-                    keypoints_dict['left_hip']['x'] -= 10
-                
-                # B: Left Shoulder (Screen Right) -> Up (-Y)
-                if keypoints_dict.get('left_shoulder') and keypoints_dict['left_shoulder']['visible']:
-                    keypoints_dict['left_shoulder']['y'] -= 20 # Increased slightly
-
-            if is_swayback_view:
-                self._debug_print("Applying 'Swayback' view manual adjustments")
-                # B: Left Shoulder (Screen Right) -> Down (+Y) to bring it onto the body
-                if keypoints_dict.get('left_shoulder') and keypoints_dict['left_shoulder']['visible']:
-                    keypoints_dict['left_shoulder']['y'] += 35
-                
-                # F: Left Knee (Screen Right) -> Left (-X) to move it inwards
-                if keypoints_dict.get('left_knee') and keypoints_dict['left_knee']['visible']:
-                    keypoints_dict['left_knee']['x'] -= 25
-                
-                # H: Left Ankle (Screen Right) -> Left (-X) to move it inwards
-                if keypoints_dict.get('left_ankle') and keypoints_dict['left_ankle']['visible']:
-                    keypoints_dict['left_ankle']['x'] -= 25
-                
-                # G: Right Ankle (Screen Left) -> Right (+X) to move it inwards
-                if keypoints_dict.get('right_ankle') and keypoints_dict['right_ankle']['visible']:
-                    keypoints_dict['right_ankle']['x'] += 25
-        except Exception as e:
-            print(f"Postural adjustments error: {e}")
-
+        
         self._add_midpoints(keypoints_dict)
-        # Also extract lateral points if they exist (indices 0-6 overlap)
-        self._add_lateral_points(results, keypoints_dict)
+        # Also extract lateral points ONLY if lateral view (Phase 37 Fix)
+        if is_lateral:
+            self._add_lateral_points(results, keypoints_dict)
+
+        # =========================================================
+        # SKELETON SNAPPING / TEMPLATE ENFORCEMENT (User Request)
+        # Ensure results are "unambiguous" by enforcing strict geometry
+        # =========================================================
+        self._apply_skeleton_template(keypoints_dict)
+        
+        # =========================================================
+        # KEYPOINT F (Left Knee) LEG ALIGNMENT FIX (User Request)
+        # Shift Left Knee (F) rightward to be more "pas di kaki"
+        # =========================================================
+        # if keypoints_dict.get('left_knee') and keypoints_dict['left_knee'].get('visible'):
+        #      # Heuristic: Shift F towards the center line or simply right
+        #      # Checking if we are in Frontal view
+        #      lk = keypoints_dict['left_knee']
+        #      
+        #      # Shift right by a fixed margin or relative size
+        #      # Using 15px as a base 'nudge'
+        #      shift_amount = 15
+        #      if self.pixel_to_mm_ratio:
+        #          # Adjust based on scale if available (e.g. ~40mm)
+        #          shift_amount = 40 / self.pixel_to_mm_ratio
+        #      
+        #      lk['x'] += shift_amount 
+        #      self._debug_print(f"[CORRECTION] Corrected Keypoint F (Left Knee) by +{shift_amount:.1f}px")
+
+        # =========================================================
+        # BOUNDARY CHECK (DEBUG)
+        # Check if any keypoints are outside the person bounding box
+        # =========================================================
+        self._check_keypoints_bounds(keypoints_dict, results)
 
         # =========================================================
         # HORIZONTAL ALIGNMENT CORRECTION (Phase 23)
@@ -296,9 +329,124 @@ class AdvancedPoseAnalyzer:
                             if kp and 'x' in kp:
                                 kp['x'] += x_shift
                         
-                        self._debug_print(f"📐 ALIGNMENT-FIX: Nudged skeleton by {x_shift:.1f}px horizontally")
+                        self._debug_print(f"[ALIGNMENT-FIX] Nudged skeleton by {x_shift:.1f}px horizontally")
         except Exception as e:
             print(f"Alignment fix error: {e}")
+
+        # =========================================================
+        # CLAMPING TO BBOX (Final Fix)
+        # =========================================================
+        self._clamp_keypoints_to_bbox(keypoints_dict, results)
+
+        # =========================================================
+        # FINAL MIRROR FIX - Last resort to ensure left side matches right
+        # This runs AFTER all other processing to ensure keypoints stay inside body
+        # =========================================================
+        try:
+            person_bbox = None
+            for result in results:
+                if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
+                    b = result.boxes.xyxy[0].cpu().numpy()
+                    person_bbox = (b[0], b[1], b[2], b[3])
+                    break
+            
+            if person_bbox and not is_lateral:
+                # =========================================================
+                # DYNAMIC LEG COLUMNS (Frontal/Posterior)
+                # =========================================================
+                # Goal: Keep E(Knee), F(Knee), G(Ankle), H(Ankle) "Inside Body"
+                
+                # 1. Calculate Reference Body Width (Hip Width)
+                hip_keys = ['right_hip', 'left_hip']
+                hips_x = [keypoints_dict[k]['x'] for k in hip_keys if keypoints_dict.get(k) and keypoints_dict[k].get('visible')]
+                
+                hip_width = 0
+                if len(hips_x) == 2:
+                    hip_width = abs(hips_x[0] - hips_x[1])
+                
+                # Fallback width from BBox if Hips are unreliable
+                bbox_width = person_bbox[2] - person_bbox[0]
+                if hip_width < bbox_width * 0.1: # Too small or invalid
+                    hip_width = bbox_width * 0.35 # Approx hip width relative to bbox
+                
+                # Leg Column Width: ~40% of Hip Width (Conservative constraint)
+                # The leg column is centered at the Hip Joint
+                col_width = hip_width * 0.4
+                
+                # 2. Dynamic Clamping: Knees (E, F)
+                # Knees must be within [Hip - col_width, Hip + col_width]
+                knee_hip_pairs = [('right_hip', 'right_knee', 'Right Leg'), ('left_hip', 'left_knee', 'Left Leg')]
+                
+                for hip_k, knee_k, label in knee_hip_pairs:
+                    hip = keypoints_dict.get(hip_k)
+                    knee = keypoints_dict.get(knee_k)
+                    
+                    if hip and hip.get('visible') and knee and knee.get('visible'):
+                        # Check "Leg Column" containment
+                        dist = knee['x'] - hip['x']
+                        
+                        # Correct if outside column
+                        if abs(dist) > col_width:
+                            # Clamp to edge of column
+                            correction = col_width if dist > 0 else -col_width
+                            knee['x'] = float(hip['x'] + correction)
+                            self._debug_print(f"[LEG COLUMN] {knee_k} clamped to {label} column")
+                        
+                        # ALIGNMENT: Prefer straight vertical legs for standard posture
+                        # If deviation is small, snap to vertical
+                        elif abs(dist) < col_width * 0.5:
+                             # Soft snap towards hip vertical (weight 0.5)
+                             target = hip['x']
+                             current = knee['x']
+                             knee['x'] = float(current * 0.5 + target * 0.5)
+
+                # 3. Dynamic Clamping: Ankles (G, H)
+                # Ankles must be aligned with Knees (Leg Column Continuation)
+                bby1, bby2 = person_bbox[1], person_bbox[3]
+                bbox_height = bby2 - bby1
+                target_ankle_y = bby1 + bbox_height * 0.96 # Near bottom
+                
+                ankle_knee_pairs = [('right_knee', 'right_ankle'), ('left_knee', 'left_ankle')]
+                for knee_k, ankle_k in ankle_knee_pairs:
+                    knee = keypoints_dict.get(knee_k)
+                    ankle = keypoints_dict.get(ankle_k)
+                    
+                    if knee and knee.get('visible') and ankle and ankle.get('visible'):
+                         # Ankle Column is tighter (tapered leg)
+                         ankle_col_width = col_width * 0.6
+                         
+                         dist = ankle['x'] - knee['x']
+                         
+                         if abs(dist) > ankle_col_width:
+                             correction = ankle_col_width if dist > 0 else -ankle_col_width
+                             ankle['x'] = float(knee['x'] + correction)
+                             self._debug_print(f"[ANKLE COLUMN] {ankle_k} clamped")
+                         
+                         # Push down if too high
+                         if ankle['y'] < target_ankle_y - 30:
+                             ankle['y'] = float(target_ankle_y)
+                             self._debug_print(f"[ANKLE HEIGHT] {ankle_k} fixed")
+
+                # 4. Final Symmetry Check (Shoulders, Hips) - Midline
+                anchors = ['right_shoulder', 'left_shoulder', 'right_hip', 'left_hip']
+                valid_anchors_x = [keypoints_dict[k]['x'] for k in anchors if keypoints_dict.get(k) and keypoints_dict[k].get('visible')]
+                midline = sum(valid_anchors_x) / len(valid_anchors_x) if valid_anchors_x else (person_bbox[0] + person_bbox[2])/2
+                
+                pairs = [('right_shoulder', 'left_shoulder'), ('right_hip', 'left_hip')]
+                for r_k, l_k in pairs:
+                    r = keypoints_dict.get(r_k)
+                    l = keypoints_dict.get(l_k)
+                    if r and l and r.get('visible') and l.get('visible'):
+                        r_dist = midline - r['x']
+                        l_dist = l['x'] - midline
+                        # If asymmetry > 15px, averaging
+                        if abs(r_dist - l_dist) > 15:
+                            avg_dist = (r_dist + l_dist) / 2
+                            r['x'] = float(midline - avg_dist)
+                            l['x'] = float(midline + avg_dist)
+                            self._debug_print(f"[SYMMETRY] {r_k}-{l_k} balanced")
+        except Exception as e:
+            print(f"Final mirror fix error: {e}")
 
         self._debug_print(f"Extracted {len(keypoints_dict)} keypoints")
         return keypoints_dict
@@ -342,7 +490,7 @@ class AdvancedPoseAnalyzer:
                         'confidence': 0.5, # Synthetic confidence
                         'visible': True
                     }
-                    self._debug_print(f"🔨 RECONSTRUCTED {left_k} from {right_k}")
+                    self._debug_print(f"[RECONSTRUCTED] {left_k} from {right_k}")
                     
                 # Case 2: Right Missing, Left Exists
                 elif (not r_pt or not r_pt['visible']) and (l_pt and l_pt['visible']):
@@ -355,7 +503,7 @@ class AdvancedPoseAnalyzer:
                         'confidence': 0.5,
                         'visible': True
                     }
-                    self._debug_print(f"🔨 RECONSTRUCTED {right_k} from {left_k}")
+                    self._debug_print(f"[RECONSTRUCTED] {right_k} from {left_k}")
 
             # 3. Vertical Hierarchy Enforcement (Anatomical Logic)
             # Shoulder < Hip < Knee < Ankle (in Y-coordinates, since 0 is top)
@@ -375,13 +523,89 @@ class AdvancedPoseAnalyzer:
                     low_pt = keypoints_dict.get(low_k)
                     if low_pt and low_pt['visible']:
                         # If lower point is ABOVE upper point (smaller Y), push it down
-                        if low_pt['y'] < avg_upper_y + 20: # Buffer of 20px
-                            forced_y = avg_upper_y + 100 # Force it significantly down
-                            self._debug_print(f"⚠️ ANATOMY FIX: Pushing {low_k} down (was {low_pt['y']:.1f}, now {forced_y:.1f})")
+                        if low_pt['y'] < avg_upper_y + 10: # Buffer reduced from 20px to 10px
+                            forced_y = avg_upper_y + 30 # Reduced push from 100px to 30px
+                            self._debug_print(f"[ANATOMY FIX] Pushing {low_k} down (was {low_pt['y']:.1f}, now {forced_y:.1f})")
                             low_pt['y'] = forced_y
                             
         except Exception as e:
             print(f"Anatomical enforcement error: {e}")
+
+    def _apply_skeleton_template(self, keypoints_dict):
+        """
+        Force-align keypoints to a rigid 'Ideal Skeleton' template to prevent ambiguous shapes.
+        This acts as a 'Snap-to-Grid' for human posture.
+        """
+        try:
+            # Check if Lateral View detected
+            is_lateral = False
+            for k in keypoints_dict:
+                if k.startswith('lateral_') and keypoints_dict[k] and keypoints_dict[k]['visible']:
+                    is_lateral = True
+                    break
+            
+            if is_lateral:
+                self._snap_lateral_skeleton(keypoints_dict)
+            else:
+                self._snap_frontal_skeleton(keypoints_dict)
+                
+        except Exception as e:
+            print(f"Skeleton Template Error: {e}")
+
+    def _snap_lateral_skeleton(self, keypoints_dict):
+        """align lateral points A(Ear)->B(Shoulder)->E(Pelvic)->F(Knee)->G(Ankle)"""
+        # Get points
+        pt_a = keypoints_dict.get('lateral_ear')
+        pt_b = keypoints_dict.get('lateral_shoulder')
+        pt_e = keypoints_dict.get('lateral_pelvic_center')
+        pt_f = keypoints_dict.get('lateral_knee')
+        pt_g = keypoints_dict.get('lateral_ankle')
+        
+        # We need at least B and E to form the spinal axis
+        if not (pt_b and pt_e): return
+        
+        # 1. EAR (A) to SHOULDER (B) SNAPPING
+        if pt_a and pt_b:
+            dx_ab = pt_a['x'] - pt_b['x']
+            # If Ear is roughly above shoulder (within 25px), snap to vertical
+            if abs(dx_ab) < 25:
+                avg_x = (pt_a['x'] + pt_b['x']) / 2
+                pt_a['x'] = avg_x
+                pt_b['x'] = avg_x
+                self._debug_print("Refined Lateral Head Verticality (Snapping)")
+
+        # 2. ENFORCE KNEE (F) and ANKLE (G) STABILITY
+        # Align G (Ankle) to be somewhat below F (Knee) if the deviation is small
+        # if pt_f and pt_g:
+        #     dx = pt_g['x'] - pt_f['x']
+        #     # If ankle is within 30px of knee vertical, SNAP IT to vertical
+        #     if abs(dx) < 30:
+        #         avg_x = (pt_f['x'] + pt_g['x']) / 2
+        #         pt_f['x'] = avg_x
+        #         pt_g['x'] = avg_x
+        #         self._debug_print("Refined Lateral Leg Verticality (Snapping)")
+
+    def _snap_frontal_skeleton(self, keypoints_dict):
+        """Align frontal points for symmetry"""
+        pairs = [
+            ('left_knee', 'left_ankle'),
+            ('right_knee', 'right_ankle'),
+            ('left_hip', 'left_knee'),
+            ('right_hip', 'right_knee')
+        ]
+        
+        for top, bot in pairs:
+            t = keypoints_dict.get(top)
+            b = keypoints_dict.get(bot)
+            if t and b and t.get('visible') and b.get('visible'):
+                # Check vertical alignment
+                dx = abs(t['x'] - b['x'])
+                # If very close to vertical, make it perfectly vertical
+                if dx < 15:
+                    avg_x = (t['x'] + b['x']) / 2
+                    t['x'] = avg_x
+                    b['x'] = avg_x
+                    self._debug_print(f"Refined Frontal Verticality: {top}-{bot}")
 
     def _add_lateral_points(self, results, keypoints_dict):
         """Extract lateral-specific points based on side orientation (Left/Right) with BBox clipping"""
@@ -466,30 +690,85 @@ class AdvancedPoseAnalyzer:
         kn = keypoints_dict.get('lateral_knee')
         
         if sh and kn and pb and pf:
-            # 1. Align E vertically with B (Shoulder) and F (Knee) to form a plumb line
-            e_x = (sh['x'] + kn['x']) / 2
+            # 1. USE SHOULDER as the PRIMARY X ANCHOR for all lateral points
+            # Shoulder is usually the most accurately detected point in side view
+            shoulder_x = sh['x']
+            
+            # Force knee and ankle to be close to shoulder X (within small tolerance)
+            # This ensures all points stay inside the body silhouette
+            if kn:
+                # Knee should be roughly vertical with shoulder (max 15% of bbox width deviation)
+                if person_bbox is not None:
+                    max_dev = (person_bbox[2] - person_bbox[0]) * 0.15
+                else:
+                    max_dev = 50
+                if abs(kn['x'] - shoulder_x) > max_dev:
+                    kn['x'] = float(shoulder_x)
+                    self._debug_print(f"[LATERAL] Knee aligned to shoulder X")
+            
+            ankle = keypoints_dict.get('lateral_ankle')
+            if ankle:
+                if person_bbox is not None:
+                    max_dev = (person_bbox[2] - person_bbox[0]) * 0.15
+                else:
+                    max_dev = 50
+                if abs(ankle['x'] - shoulder_x) > max_dev:
+                    ankle['x'] = float(shoulder_x)
+                    self._debug_print(f"[LATERAL] Ankle aligned to shoulder X")
+            
+            # E center is at shoulder X position
+            e_x = shoulder_x
             e_y = (pb['y'] + pf['y']) / 2 # Initial vertical center
             
             # 2. Enforce 30-degree slant (Miring) for C-D line
-            # Increase width for better visibility as requested (Phase 16)
-            width = 450 # Substantial width for professional look
+            # ADAPTIVE SCALING: Width depends on person size (BBox width)
+            # Default fallback if bbox missing is 1000px width context
+            p_width = 1000
+            if person_bbox is not None:
+                p_width = person_bbox[2] - person_bbox[0]
+            
+            # Target width = ~40% of person width for clearly visible C-D separation
+            width = p_width * 0.40
+            if width < 50: width = 50 # Minimum width for visibility
             
             angle_rad = np.radians(30) # 30 degrees miring
             dy = (width / 2) * np.tan(angle_rad)
             
+            # Check if we have GOOD original detections for C/D
+            # If both are visible and high confidence, TRUST THEM partially
+            trust_original = False
+            if pb['confidence'] > 0.6 and pf['confidence'] > 0.6:
+                 orig_width = abs(pb['x'] - pf['x'])
+                 # If original width is reasonable (e.g. 5-20% of bbox), use it
+                 if 0.05 * p_width < orig_width < 0.20 * p_width:
+                     width = orig_width
+                     trust_original = True
+                     self._debug_print(f"Trusting original pelvic width: {width:.1f}px")
+            
+            # E center stays at shoulder X (already calculated above)
+
             # Determine direction based on orientation
-            # Right view (facing Right): Front (D) is to the Right (+X), Back (C) is to the Left (-X)
-            # Left view (facing Left): Front (D) is to the Left (-X), Back (C) is to the Right (+X)
+            # Use asymmetric width: C (back) is closer to center, D (front) also closer
+            back_offset = width * 0.35  # C closer to center (35% of width)
+            front_offset = width * 0.45  # D also closer to center (45% of width, reduced from 65%)
+            
             if is_right_lateral:
-                pb['x'] = e_x - (width / 2)
-                pf['x'] = e_x + (width / 2)
+                pb['x'] = e_x - back_offset
+                pf['x'] = e_x + front_offset
             else: # Left Lateral (Default)
-                pb['x'] = e_x + (width / 2)
-                pf['x'] = e_x - (width / 2)
+                pb['x'] = e_x + back_offset  # C is to the right (back) but closer
+                pf['x'] = e_x - front_offset  # D is to the left (front) extends more
             
             # C (Back) is always higher, D (Front) is always lower for Anterior Tilt look
-            pb['y'] = e_y - dy
-            pf['y'] = e_y + dy
+            # Add vertical offset to push C and D down to pelvis area
+            if person_bbox is not None:
+                bbox_height_local = person_bbox[3] - person_bbox[1]
+                pelvic_y_offset = bbox_height_local * 0.05  # 5% of bbox height
+            else:
+                pelvic_y_offset = 30  # Default fallback
+            
+            pb['y'] = e_y - dy + pelvic_y_offset
+            pf['y'] = e_y + dy + pelvic_y_offset
             
             # Update E in dict
             keypoints_dict['lateral_pelvic_center'] = {
@@ -498,13 +777,53 @@ class AdvancedPoseAnalyzer:
                 'visible': True
             }
             
-            # Re-clip all adjusted points to BBox
+            # VERTICAL OFFSET: Push F (knee) and G (ankle) down to correct positions
+            # The model detection tends to be slightly above the actual joint
+            # UPDATE: User reported Right View (F) is too low. Reducing offset for Right View.
             if person_bbox is not None:
-                for pt in [pb, pf, keypoints_dict['lateral_pelvic_center']]:
-                    pt['x'] = float(np.clip(pt['x'], person_bbox[0], person_bbox[2]))
-                    pt['y'] = float(np.clip(pt['y'], person_bbox[1], person_bbox[3]))
+                bbox_height = person_bbox[3] - person_bbox[1]
+                
+                if is_right_lateral:
+                    # Minimal offset for Right View as indices seem more accurate/lower already
+                    knee_offset = bbox_height * 0.0 
+                    ankle_offset = bbox_height * 0.02
+                else:
+                    # Legacy offsets for Left View (Assuming it works as previously reported)
+                    knee_offset = bbox_height * 0.15 
+                    ankle_offset = bbox_height * 0.20
+                
+                if kn:
+                    kn['y'] = float(kn['y'] + knee_offset)
+                    self._debug_print(f"[LATERAL] Knee pushed down by {knee_offset:.1f}px")
+                
+                if ankle:
+                    ankle['y'] = float(ankle['y'] + ankle_offset)
+                    # Shift ankle X slightly to the right of shoulder to stay inside body
+                    bbox_width = person_bbox[2] - person_bbox[0]
+                    ankle_x_offset = bbox_width * 0.05  # 5% to the right
+                    ankle['x'] = float(shoulder_x + ankle_x_offset)
+                    self._debug_print(f"🔧 LATERAL: Ankle adjusted to ({ankle['x']:.1f}, {ankle['y']:.1f})")
             
-            self._debug_print(f"Universal Medical Alignment applied (Right={is_right_lateral})")
+            # Re-clip ALL lateral points to BBox with strict inner margin
+            if person_bbox is not None:
+                # Use tighter percentage-based margin to ensure points stay INSIDE body
+                pad_x = (person_bbox[2] - person_bbox[0]) * 0.20  # 20% horizontal (tightened from 10%)
+                pad_y = (person_bbox[3] - person_bbox[1]) * 0.03  # 3% vertical
+                
+                # Get all lateral points that need clipping
+                lateral_keys = ['lateral_pelvic_back', 'lateral_pelvic_front', 'lateral_pelvic_center', 
+                                'lateral_knee', 'lateral_ankle', 'lateral_shoulder', 'lateral_ear']
+                
+                for key in lateral_keys:
+                    pt = keypoints_dict.get(key)
+                    if pt and pt.get('visible'):
+                        old_x = pt['x']
+                        pt['x'] = float(np.clip(pt['x'], person_bbox[0]+pad_x, person_bbox[2]-pad_x))
+                        pt['y'] = float(np.clip(pt['y'], person_bbox[1]+pad_y, person_bbox[3]-pad_y))
+                        if pt['x'] != old_x:
+                            self._debug_print(f"🔧 LATERAL CLAMP: {key} x={old_x:.1f} -> {pt['x']:.1f}")
+            
+            self._debug_print(f"Universal Medical Alignment applied (Right={is_right_lateral}, Width={width:.1f}px)")
             return
             
         # Default Midpoint Calculation (Fallback if points missing)
@@ -1284,3 +1603,83 @@ class AdvancedPoseAnalyzer:
             'assessment': assessment,
             'recommendation': recommendation
         }
+
+    def _check_keypoints_bounds(self, keypoints_dict, results):
+        """
+        DEBUG: Check if any visible keypoints are outside the person BBox.
+        """
+        try:
+            person_bbox = None
+            for result in results:
+                if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
+                    b = result.boxes.xyxy[0].cpu().numpy()
+                    person_bbox = (b[0], b[1], b[2], b[3])
+                    break
+            
+            if person_bbox:
+                bx1, by1, bx2, by2 = person_bbox
+                out_of_bounds = []
+                
+                for k, pt in keypoints_dict.items():
+                    if pt and pt.get('visible') and 'x' in pt:
+                        x, y = pt['x'], pt['y']
+                        # Add a small tolerance buffer (e.g. 10px)
+                        if x < bx1 - 10 or x > bx2 + 10 or y < by1 - 10 or y > by2 + 10:
+                            out_of_bounds.append(f"{k} ({x:.1f}, {y:.1f})")
+                
+                if out_of_bounds:
+                    self._debug_print(f"⚠️ WARNING: {len(out_of_bounds)} keypoints outside BBox: {', '.join(out_of_bounds)}")
+                    keypoints_dict['debug_warnings'] = out_of_bounds
+                else:
+                    self._debug_print("✅ All keypoints within BBox limits")
+                    
+        except Exception as e:
+            print(f"Bounds check error: {e}")
+
+    def _clamp_keypoints_to_bbox(self, keypoints_dict, results):
+        """
+        Force all keypoints to be within the person ROI bounding box.
+        This fixes issues where alignment/snapping logic pushes points outside the body.
+        """
+        try:
+            person_bbox = None
+            for result in results:
+                if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
+                    b = result.boxes.xyxy[0].cpu().numpy()
+                    person_bbox = (b[0], b[1], b[2], b[3])
+                    break
+            
+            if person_bbox:
+                bx1, by1, bx2, by2 = person_bbox
+                bbox_w = bx2 - bx1
+                bbox_h = by2 - by1
+                
+                # Inner margin: 10% horizontal to ensure points are INSIDE body
+                margin_x = bbox_w * 0.10
+                margin_y = bbox_h * 0.02  # Smaller vertical margin
+                
+                # Clamp bounds (inside bbox)
+                clamp_x1 = bx1 + margin_x
+                clamp_x2 = bx2 - margin_x
+                clamp_y1 = by1 + margin_y
+                clamp_y2 = by2 - margin_y
+                
+                clamped_count = 0
+                
+                for k, pt in keypoints_dict.items():
+                    if pt and pt.get('visible') and 'x' in pt:
+                        orig_x, orig_y = pt['x'], pt['y']
+                        new_x = max(clamp_x1, min(orig_x, clamp_x2))
+                        new_y = max(clamp_y1, min(orig_y, clamp_y2))
+                        
+                        if new_x != orig_x or new_y != orig_y:
+                            pt['x'] = float(new_x)
+                            pt['y'] = float(new_y)
+                            clamped_count += 1
+                            self._debug_print(f"   -> Clamped {k}: ({orig_x:.1f},{orig_y:.1f}) -> ({new_x:.1f},{new_y:.1f})")
+                
+                if clamped_count > 0:
+                    self._debug_print(f"[CLAMPED] {clamped_count} keypoints to INNER BBox boundaries")
+                    
+        except Exception as e:
+            print(f"Clamping error: {e}")

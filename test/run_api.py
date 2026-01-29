@@ -21,11 +21,11 @@ if __name__ == "__main__":
     port = int(os.getenv("API_PORT", 8000))
 
     print(f"""
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                                                              ║
-    ║     KURO PERFORMANCE POSTURAL ASSESSMENT API                ║
-    ║                                                              ║
-    ╚══════════════════════════════════════════════════════════════╝
+    ==============================================================
+                                                              
+         KURO PERFORMANCE POSTURAL ASSESSMENT API                
+                                                              
+    ==============================================================
 
     Server starting on: http://{host}:{port}
     API Documentation: http://{host}:{port}/docs

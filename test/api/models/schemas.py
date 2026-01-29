@@ -76,6 +76,7 @@ class AnalysisResult(BaseModel):
     keypoints: Optional[Dict]
     conversion_ratio: Optional[float]
     actual_height_mm: Optional[float]
+    skeleton_image: Optional[str] = None
 
 
 class AnalysisResponse(BaseModel):
