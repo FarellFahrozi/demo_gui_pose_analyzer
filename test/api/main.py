@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 
-from api.routes import analysis, patients
+from api.routes import analysis, patients, auth
 from api.models.schemas import HealthCheckResponse
 from api.services.analyzer import PostureAnalyzerService
 from api.services.database import DatabaseService
@@ -28,6 +28,7 @@ app.add_middleware(
 
 app.include_router(analysis.router)
 app.include_router(patients.router)
+app.include_router(auth.router)
 
 
 @app.get("/", response_model=dict)

@@ -18,7 +18,7 @@ async def create_patient(patient: PatientCreate):
         if existing:
             raise HTTPException(status_code=400, detail="Patient with this name already exists")
 
-        result = db_service.create_patient(patient.name, patient.height_cm)
+        result = db_service.create_patient(patient.name, patient.height_cm, patient.password)
 
         return PatientResponse(
             id=result["id"],

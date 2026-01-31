@@ -6,6 +6,7 @@ from datetime import datetime
 class PatientCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     height_cm: float = Field(..., gt=0, le=300)
+    password: str = Field(..., min_length=6)
 
 
 class PatientResponse(BaseModel):

@@ -5,7 +5,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from gui.screens.landing import LandingScreen
+from gui.screens.landing import LandingScreen, RegistrationScreen
+# from gui.screens.register import RegisterScreen # Commented out as we are using the one in landing.py
 from gui.screens.upload import UploadScreen
 from gui.screens.results import ResultsScreen, DetailedReportWindow
 
@@ -58,6 +59,14 @@ class PostureAnalysisApp:
         self._clear_screen()
         # Pass scrollable_frame as parent for landing screen
         self.current_screen = LandingScreen(self.scrollable_frame, self)
+
+    def show_registration_screen(self):
+        self._clear_screen()
+        self.current_screen = RegistrationScreen(self.scrollable_frame, self)
+
+    def show_register_screen(self):
+         # Alias for backward compatibility if needed, or redirect to new method
+        self.show_registration_screen()
 
     def show_upload_screen(self, patient_data):
         self.patient_data = patient_data

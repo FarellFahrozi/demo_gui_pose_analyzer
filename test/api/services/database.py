@@ -4,11 +4,15 @@ import os
 import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from passlib.hash import bcrypt
+
+def dict_factory(cursor, row):
+    fields = [column[0] for column in cursor.description]
+    return {key: value for key, value in zip(fields, row)}
 
 class DatabaseService:
     _instance = None
-    DB_NAME = "kuro_posture.db"
-
+    
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(DatabaseService, cls).__new__(cls)
@@ -24,10 +28,12 @@ class DatabaseService:
         self._initialized = True
 
     def _get_connection(self):
-        # Allow multi-threaded access for simplicity in this context, though usually one per thread is better
-        # check_same_thread=False is needed if the connection is shared across FastAPI threads
-        conn = sqlite3.connect(self.DB_NAME, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
+        # Database file is in the 'test' directory, 3 levels up from here
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        db_path = os.path.join(base_dir, 'kuro_posture.db')
+        
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = dict_factory
         return conn
 
     def _init_db(self):
@@ -38,9 +44,10 @@ class DatabaseService:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS patients (
                 id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
+                name TEXT NOT NULL UNIQUE,
                 height_cm REAL NOT NULL,
-                created_at TEXT NOT NULL
+                password_hash TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -49,7 +56,7 @@ class DatabaseService:
             CREATE TABLE IF NOT EXISTS analyses (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
-                analysis_date TEXT NOT NULL,
+                analysis_date TIMESTAMP NOT NULL,
                 shoulder_data TEXT,
                 hip_data TEXT,
                 spinal_data TEXT,
@@ -69,7 +76,7 @@ class DatabaseService:
                 id TEXT PRIMARY KEY,
                 analysis_id TEXT NOT NULL,
                 keypoints TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (analysis_id) REFERENCES analyses (id)
             )
         ''')
@@ -77,26 +84,38 @@ class DatabaseService:
         conn.commit()
         conn.close()
 
-    def create_patient(self, name: str, height_cm: float) -> Dict:
+    def create_patient(self, name: str, height_cm: float, password: str = None) -> Dict:
         conn = self._get_connection()
         cursor = conn.cursor()
         
         patient_id = str(uuid.uuid4())
-        created_at = datetime.now().isoformat()
+        created_at = datetime.now()
+        password_hash = bcrypt.hash(password) if password else None
         
         try:
             cursor.execute(
-                "INSERT INTO patients (id, name, height_cm, created_at) VALUES (?, ?, ?, ?)",
-                (patient_id, name, height_cm, created_at)
+                "INSERT INTO patients (id, name, height_cm, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                (patient_id, name, height_cm, password_hash, created_at)
             )
             conn.commit()
             
-            return {
-                "id": patient_id,
-                "name": name,
-                "height_cm": height_cm,
-                "created_at": created_at
-            }
+            # Fetch the created patient
+            cursor.execute("SELECT * FROM patients WHERE id = ?", (patient_id,))
+            return cursor.fetchone()
+        finally:
+            conn.close()
+
+    def verify_patient(self, name: str, password: str) -> Optional[Dict]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("SELECT * FROM patients WHERE name = ?", (name,))
+            patient = cursor.fetchone()
+            
+            if patient and bcrypt.verify(password, patient['password_hash']):
+                return patient
+            return None
         finally:
             conn.close()
 
@@ -106,10 +125,7 @@ class DatabaseService:
         
         try:
             cursor.execute("SELECT * FROM patients WHERE name = ?", (name,))
-            row = cursor.fetchone()
-            if row:
-                return dict(row)
-            return None
+            return cursor.fetchone()
         finally:
             conn.close()
 
@@ -119,10 +135,7 @@ class DatabaseService:
         
         try:
             cursor.execute("SELECT * FROM patients WHERE id = ?", (patient_id,))
-            row = cursor.fetchone()
-            if row:
-                return dict(row)
-            return None
+            return cursor.fetchone()
         finally:
             conn.close()
 
@@ -135,8 +148,7 @@ class DatabaseService:
                 "SELECT * FROM patients ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (limit, offset)
             )
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            return cursor.fetchall()
         finally:
             conn.close()
 
@@ -145,7 +157,7 @@ class DatabaseService:
         cursor = conn.cursor()
         
         analysis_id = str(uuid.uuid4())
-        analysis_date = datetime.now().isoformat()
+        analysis_date = datetime.now()
         
         # Serialize dictionaries to JSON strings
         shoulder_data = json.dumps(analysis_data.get("shoulder")) if analysis_data.get("shoulder") else None
@@ -170,7 +182,6 @@ class DatabaseService:
             ))
             conn.commit()
             
-            # Fetch back to confirm (and matches previous return style)
             cursor.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,))
             row = cursor.fetchone()
             return self._row_to_analysis_dict(row)
@@ -217,7 +228,6 @@ class DatabaseService:
                 (kp_id, analysis_id, keypoints_json)
             )
             conn.commit()
-            
             return {
                 "id": kp_id,
                 "analysis_id": analysis_id,
@@ -250,7 +260,11 @@ class DatabaseService:
             if data.get(field):
                 try:
                     data[field] = json.loads(data[field])
-                except json.JSONDecodeError:
-                    data[field] = None
+                except (json.JSONDecodeError, TypeError):
+                    # Handle cases where data might already be a dict or valid json fails
+                    if isinstance(data[field], dict):
+                        pass
+                    else:
+                        data[field] = None
                     
         return data

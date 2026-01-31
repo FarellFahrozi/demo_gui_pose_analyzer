@@ -596,6 +596,28 @@ class ResultsScreen(ttk.Frame):
             import traceback
             traceback.print_exc()
 
+    def _add_view_legend(self, ax):
+        """Adds view type to legend using a proxy artist"""
+        view_name = self._get_view_display_name()
+        # Create a dummy patch for legend
+        import matplotlib.patches as mpatches
+        # Add to legend as a handle
+        handles, labels = ax.get_legend_handles_labels()
+        # Create a blank rectangle with label
+        proxy = mpatches.Patch(color='none', label=f"VIEW: {view_name}")
+        handles.append(proxy)
+        ax.legend(handles=handles, loc='best')
+
+    def _add_lateral_direction_indicators(self, ax):
+        """Adds (+) and (-) watermarks: Left (+) and Right (-) using axis coordinates"""
+        # Place text at 10% and 90% of the axis width to ensure visibility
+        # Left side is Positive (+)
+        ax.text(0.1, 0.5, '← (+)', transform=ax.transAxes, fontsize=25, 
+                color='black', alpha=0.6, ha='center', va='center', fontweight='bold', zorder=100)
+        # Right side is Negative (-)
+        ax.text(0.9, 0.5, '(-) →', transform=ax.transAxes, fontsize=25, 
+                color='black', alpha=0.6, ha='center', va='center', fontweight='bold', zorder=100)
+
     def _generate_lateral_figures(self):
         # Re-implementation of graph logic for headless export - SPLIT INTO SEPARATE FIGURES
         head_data = self.analysis_data.get('head', {})
@@ -665,6 +687,8 @@ class ResultsScreen(ttk.Frame):
         ax1.legend(loc='upper right')
         
         fig1._custom_name = "Head"
+        self._add_view_legend(ax1)
+        self._add_lateral_direction_indicators(ax1)
         self.graph_figures.append(fig1)
 
         # --- FIGURE 2: SPINE ---
@@ -696,6 +720,8 @@ class ResultsScreen(ttk.Frame):
         ax2.legend(loc='upper right')
         
         fig2._custom_name = "Spine"
+        self._add_view_legend(ax2)
+        self._add_lateral_direction_indicators(ax2)
         self.graph_figures.append(fig2)
 
         # --- FIGURE 3: PELVIS ---
@@ -722,7 +748,11 @@ class ResultsScreen(ttk.Frame):
         ax3.text(dx, y_d + 0.5, 'D', fontsize=12, fontweight='bold')
         mid_x_cd = (cx + dx) / 2
         mid_y_cd = (y_c + y_d) / 2
-        ax3.text(mid_x_cd, mid_y_cd, f"{m_pel_wd:.1f}mm", 
+        m_pel_height_val = 0.0
+        if kc and kd:
+            m_pel_height_val = abs(kc['y'] - kd['y']) * mm_per_px
+
+        ax3.text(mid_x_cd, mid_y_cd, f"{m_pel_height_val:.1f}mm", 
                 color='blue', fontsize=10, fontweight='bold', ha='center',
                 bbox=dict(facecolor='white', edgecolor='blue', alpha=0.7))
         min_y, max_y = min(y_c, y_d), max(y_c, y_d)
@@ -732,6 +762,8 @@ class ResultsScreen(ttk.Frame):
         ax3.legend(loc='upper right')
         
         fig3._custom_name = "Pelvis"
+        self._add_view_legend(ax3)
+        self._add_lateral_direction_indicators(ax3)
         self.graph_figures.append(fig3)
 
         # --- FIGURE 4: LEG ---
@@ -772,6 +804,8 @@ class ResultsScreen(ttk.Frame):
         ax4.legend(loc='upper right')
         
         fig4._custom_name = "Leg"
+        self._add_view_legend(ax4)
+        self._add_lateral_direction_indicators(ax4)
         self.graph_figures.append(fig4)
 
     def _generate_frontal_figures(self):
@@ -817,6 +851,7 @@ class ResultsScreen(ttk.Frame):
         ax1.legend(loc='lower right')
         
         fig1._custom_name = "Shoulder"
+        self._add_view_legend(ax1)
         self.graph_figures.append(fig1)
 
         # --- FIGURE 2: PELVIS ---
@@ -832,68 +867,79 @@ class ResultsScreen(ttk.Frame):
         ax2.plot([2, hip_x_end], [5, hip_y_end], 'b-', linewidth=4, label=f'Pelvis: {hip_diff:.1f}mm')
         ax2.set_title('PELVIS ALIGNMENT', fontsize=16, fontweight='bold', pad=10)
         ax2.legend(loc='lower right')
-
         fig2._custom_name = "Pelvis"
+        self._add_view_legend(ax2)
         self.graph_figures.append(fig2)
 
-        # --- FIGURE 3: RIGHT LEG ---
+        # --- FIGURE 3: LEG ALIGNMENT (Combined) ---
         fig3 = plt.figure(figsize=(8, 6), facecolor='white')
         ax3 = fig3.add_subplot(111)
         ax3.set_ylim(0, 10)
         ax3.grid(True, alpha=0.3)
-        ax3.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
-        c_x = 5; e_x = 5; g_x = 5
+        
+        # New Centers
+        c_right = 3
+        c_left = 7
+        
+        ax3.plot([c_right, c_right], [1, 9], 'k--', linewidth=2, label='R.Neutral')
+        ax3.plot([c_left, c_left], [1, 9], 'k--', linewidth=2, label='L.Neutral')
+        
+        # Initialize x-coordinates with new centers
+        c_x = c_right; e_x = c_right; g_x = c_right # Right
+        d_x = c_left; f_x = c_left; h_x = c_left # Left
+        
+        x_limits = [0, 10] # Default range covering both centers for sure
+
+        # Right Leg (C-E-G) - Green - Centered at 3
         if rc and re and rg:
             scale = 1.0 / 120.0 
             dx_ce = (re['x'] - rc['x']) * mm_px
             dx_eg = (rg['x'] - rc['x']) * mm_px
-            e_x = 5 + (dx_ce * scale)
-            g_x = 5 + (dx_eg * scale)
-        ax3.plot(c_x, 9, 'go', markersize=10, label='C (Hip)')
-        ax3.plot(e_x, 5, 'go', markersize=10, label='E (Knee)')
-        ax3.plot(g_x, 1, 'go', markersize=10, label='G (Ankle)')
-        ax3.plot([c_x, e_x], [9, 5], 'g-', linewidth=3, label='Alignment')
-        ax3.plot([e_x, g_x], [5, 1], 'g-', linewidth=3)
-        set_dynamic_xlim(ax3, [c_x, e_x, g_x])
-        ax3.set_title('RIGHT LEG ALIGNMENT (C-E-G)', fontsize=16, fontweight='bold', pad=10)
-        ax3.legend(loc='lower right')
+            
+            e_x = c_right + (dx_ce * scale)
+            g_x = c_right + (dx_eg * scale)
+            
+            ax3.plot(c_x, 9, 'go', markersize=10, label='C (R.Hip)')
+            ax3.plot(e_x, 5, 'go', markersize=10, label='E (R.Knee)')
+            ax3.plot(g_x, 1, 'go', markersize=10, label='G (R.Ankle)')
+            ax3.plot([c_x, e_x], [9, 5], 'g-', linewidth=3, label='Right Leg')
+            ax3.plot([e_x, g_x], [5, 1], 'g-', linewidth=3)
+            
+            # Label Points
+            ax3.text(c_x + 0.2, 9, 'C', fontsize=10, fontweight='bold', color='green')
+            ax3.text(e_x + 0.2, 5, 'E', fontsize=10, fontweight='bold', color='green')
+            ax3.text(g_x + 0.2, 1, 'G', fontsize=10, fontweight='bold', color='green')
 
-        fig3._custom_name = "RightLeg"
-        self.graph_figures.append(fig3)
-
-        # --- FIGURE 4: LEFT LEG ---
-        fig4 = plt.figure(figsize=(8, 6), facecolor='white')
-        ax4 = fig4.add_subplot(111)
-        ax4.set_ylim(0, 10)
-        ax4.grid(True, alpha=0.3)
-        ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
-        d_x = 5; f_x = 5; h_x = 5
+        # Left Leg (D-F-H) - Magenta - Centered at 7
         if ld and lf and lh:
              scale = 1.0 / 120.0 
              dx_df = (lf['x'] - ld['x']) * mm_px
              dx_fh = (lh['x'] - ld['x']) * mm_px
-             f_x = 5 + (dx_df * scale)
-             h_x = 5 + (dx_fh * scale)
-        ax4.plot(d_x, 9, 'mo', markersize=10, label='D (Hip)')
-        ax4.plot(f_x, 5, 'mo', markersize=10, label='F (Knee)')
-        ax4.plot(h_x, 1, 'mo', markersize=10, label='H (Ankle)')
-        ax4.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Alignment')
-        ax4.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
-        set_dynamic_xlim(ax4, [d_x, f_x, h_x])
-        ax4.set_title('LEFT LEG ALIGNMENT (D-F-H)', fontsize=16, fontweight='bold', pad=10)
-        ax4.legend(loc='lower right')
+             
+             f_x = c_left + (dx_df * scale)
+             h_x = c_left + (dx_fh * scale)
+
+             ax3.plot(d_x, 9, 'mo', markersize=10, label='D (L.Hip)')
+             ax3.plot(f_x, 5, 'mo', markersize=10, label='F (L.Knee)')
+             ax3.plot(h_x, 1, 'mo', markersize=10, label='H (L.Ankle)')
+             ax3.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Left Leg')
+             ax3.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
+             
+             # Label Points
+             ax3.text(d_x - 0.4, 9, 'D', fontsize=10, fontweight='bold', color='magenta')
+             ax3.text(f_x - 0.4, 5, 'F', fontsize=10, fontweight='bold', color='magenta')
+             ax3.text(h_x - 0.4, 1, 'H', fontsize=10, fontweight='bold', color='magenta')
+
+        # Set limits to include all points with some padding
+        all_xs = [c_x, e_x, g_x, d_x, f_x, h_x, c_right, c_left]
+        min_x, max_x = min(all_xs), max(all_xs)
+        ax3.set_xlim(min_x - 1, max_x + 1)
+
+        ax3.set_title('LEG ALIGNMENT (Combined)', fontsize=16, fontweight='bold', pad=10)
         
-        fig4._custom_name = "LeftLeg"
-        self.graph_figures.append(fig4)             
-        ax4.plot(d_x, 9, 'mo', markersize=10, label='D (Hip)')
-        ax4.plot(f_x, 5, 'mo', markersize=10, label='F (Knee)')
-        ax4.plot(h_x, 1, 'mo', markersize=10, label='H (Ankle)')
-        ax4.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Alignment')
-        ax4.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
-        
-        set_dynamic_xlim(ax4, [d_x, f_x, h_x])
-        ax4.set_title('LEFT LEG ALIGNMENT (D-F-H)', fontsize=16, fontweight='bold', pad=10)
-        ax4.legend(loc='lower right')
+        fig3._custom_name = "LegAlignment"
+        self._add_view_legend(ax3)
+        self.graph_figures.append(fig3)
 
         plt.tight_layout()
 
@@ -1069,9 +1115,9 @@ class ResultsScreen(ttk.Frame):
             if m_sh_pel == 0 and pt_b and pt_e:
                 m_sh_pel = np.sqrt((pt_e[0]-pt_b[0])**2 + (pt_e[1]-pt_b[1])**2) * mm_per_px
                 
-            m_pel_wd = lat_dists.get('pelvic_width_mm', 0)
-            if m_pel_wd == 0 and pt_c and pt_d:
-                m_pel_wd = np.sqrt((pt_d[0]-pt_c[0])**2 + (pt_c[1]-pt_d[1])**2) * mm_per_px
+            m_pel_height_diff = 0
+            if pt_c and pt_d:
+                m_pel_height_diff = abs(pt_c[1] - pt_d[1]) * mm_per_px
 
             # New: Leg segments lengths
             m_thigh = 0
@@ -1110,11 +1156,13 @@ class ResultsScreen(ttk.Frame):
                 cv2.putText(img_vis, label_text, (mid_x+15, mid_y), font, 0.7, (0, 255, 255), 2)
 
             if pt_c and pt_d:
-                label_text = f"{m_pel_wd:.1f}mm"
+                label_text = f"Pelvic H-Diff: {m_pel_height_diff:.1f}mm"
                 mid_x, mid_y = (pt_c[0] + pt_d[0]) // 2, (pt_c[1] + pt_d[1]) // 2
-                (tw, th), _ = cv2.getTextSize(label_text, font, 0.7, 2)
-                cv2.rectangle(img_vis, (mid_x-tw//2-10, mid_y-th-10), (mid_x+tw//2+10, mid_y+10), (0,0,0), -1)
-                cv2.putText(img_vis, label_text, (mid_x-tw//2, mid_y), font, 0.7, (255, 255, 255), 2)
+                # Move label down to avoid overlap with Point E (Hip) which is at the same visual center
+                text_y = mid_y + 40 
+                (tw, th), _ = cv2.getTextSize(label_text, font, 0.6, 2)
+                cv2.rectangle(img_vis, (mid_x-tw//2-10, text_y-th-10), (mid_x+tw//2+10, text_y+10), (0,0,0), -1)
+                cv2.putText(img_vis, label_text, (mid_x-tw//2, text_y), font, 0.6, (255, 255, 255), 2)
                 
             if pt_e and pt_f:
                 label_text = f"{m_thigh:.1f}mm"
@@ -1319,6 +1367,23 @@ class ResultsScreen(ttk.Frame):
         print(f"[INFO] Final image shape: {img_vis.shape}, dtype: {img_vis.dtype}")
         print("=" * 60)
         
+        if self._is_lateral():
+            h_vis, w_vis = img_vis.shape[:2]
+            # Left Indicator: <-- (+)
+            text_l = "<-- (+)"
+            (tw_l, th_l), _ = cv2.getTextSize(text_l, font, 1.5, 3)
+            # Draw with outline for visibility
+            cv2.putText(img_vis, text_l, (20, h_vis // 2), font, 1.5, (0, 0, 0), 8)
+            cv2.putText(img_vis, text_l, (20, h_vis // 2), font, 1.5, (255, 255, 255), 3)
+
+            # Right Indicator: (-) -->
+            text_r = "(-) -->"
+            (tw_r, th_r), _ = cv2.getTextSize(text_r, font, 1.5, 3)
+            x_r = w_vis - tw_r - 20
+            # Draw with outline for visibility
+            cv2.putText(img_vis, text_r, (x_r, h_vis // 2), font, 1.5, (0, 0, 0), 8)
+            cv2.putText(img_vis, text_r, (x_r, h_vis // 2), font, 1.5, (255, 255, 255), 3)
+
         return img_vis
 
 
@@ -1400,13 +1465,47 @@ class DetailedReportWindow(tk.Toplevel):
         self._create_dashboard_ui()
         self._populate_table()
 
+    def _get_view_display_name(self):
+        view_lower = self.view_type.lower()
+        if any(keyword in view_lower for keyword in ['front', 'anterior', 'depan']):
+            return "ANTERIOR VIEW"
+        elif any(keyword in view_lower for keyword in ['back', 'posterior', 'belakang']):
+            return "POSTERIOR VIEW"
+        elif any(keyword in view_lower for keyword in ['left', 'kiri']):
+            return "LEFT VIEW"
+        elif any(keyword in view_lower for keyword in ['right', 'kanan']):
+            return "RIGHT VIEW"
+        else:
+            return f"{self.view_type.upper()} VIEW"
+
+    def _add_view_legend(self, ax):
+        """Adds view type to legend using a proxy artist"""
+        view_name = self._get_view_display_name()
+        import matplotlib.patches as mpatches
+        handles, labels = ax.get_legend_handles_labels()
+        proxy = mpatches.Patch(color='none', label=f"VIEW: {view_name}")
+        handles.append(proxy)
+        ax.legend(handles=handles, loc='best')
+
+    def _add_lateral_direction_indicators(self, ax):
+        """Adds (+) and (-) watermarks: Left (+) and Right (-)"""
+        if self._is_frontal(): return # Only for lateral
+
+        # Place text at 10% and 90% of the axis width to ensure visibility
+        # Left side is Positive (+)
+        ax.text(0.1, 0.5, '← (+)', transform=ax.transAxes, fontsize=25, 
+                color='black', alpha=0.6, ha='center', va='center', fontweight='bold', zorder=100)
+        # Right side is Negative (-)
+        ax.text(0.9, 0.5, '(-) →', transform=ax.transAxes, fontsize=25, 
+                color='black', alpha=0.6, ha='center', va='center', fontweight='bold', zorder=100)
+
     def _is_frontal(self):
         v = str(self.view_type).lower()
         return any(k in v for k in ['front', 'anterior', 'depan', 'back', 'posterior', 'belakang'])
 
     def _is_lateral(self):
         v = str(self.view_type).lower()
-        return any(k in v for k in ['left', 'right', 'lateral', 'kiri', 'kanan', 'samping', 'samping'])
+        return any(k in v for k in ['left', 'right', 'lateral', 'kiri', 'kanan', 'samping'])
 
     def _create_dashboard_ui(self):
         # Main Header
@@ -2179,11 +2278,27 @@ class DetailedReportWindow(tk.Toplevel):
         image_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
         if self.processed_image is not None:
-            h, w, _ = self.processed_image.shape
+            img_to_show = self.processed_image.copy()
+            if self._is_lateral():
+                h_vis, w_vis = img_to_show.shape[:2]
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                # Left Indicator: <-- (+)
+                text_l = "<-- (+)"
+                cv2.putText(img_to_show, text_l, (20, h_vis // 2), font, 1.5, (0, 0, 0), 8)
+                cv2.putText(img_to_show, text_l, (20, h_vis // 2), font, 1.5, (255, 255, 255), 3)
+
+                # Right Indicator: (-) -->
+                text_r = "(-) -->"
+                (tw_r, th_r), _ = cv2.getTextSize(text_r, font, 1.5, 3)
+                x_r = w_vis - tw_r - 20
+                cv2.putText(img_to_show, text_r, (x_r, h_vis // 2), font, 1.5, (0, 0, 0), 8)
+                cv2.putText(img_to_show, text_r, (x_r, h_vis // 2), font, 1.5, (255, 255, 255), 3)
+
+            h, w, _ = img_to_show.shape
             display_h = 650
             display_w = int(w * (display_h / h))
 
-            pil_img = Image.fromarray(self.processed_image)
+            pil_img = Image.fromarray(img_to_show)
             pil_img = pil_img.resize((display_w, display_h), Image.Resampling.LANCZOS)
             tk_img = ImageTk.PhotoImage(pil_img)
 
@@ -2326,7 +2441,8 @@ class DetailedReportWindow(tk.Toplevel):
         
         set_dynamic_xlim(ax1, [a_x, b_x])
         ax1.set_title('Head', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax1.legend(loc='upper right')
+        self._add_view_legend(ax1)
+        self._add_lateral_direction_indicators(ax1)
 
 
         # 2. SPINE B-E VERTICAL
@@ -2360,7 +2476,8 @@ class DetailedReportWindow(tk.Toplevel):
         
         set_dynamic_xlim(ax2, [b_x, e_x])
         ax2.set_title('Spine', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax2.legend(loc='upper right')
+        self._add_view_legend(ax2)
+        self._add_lateral_direction_indicators(ax2)
 
 
         # 3. PELVIS C-D HORIZONTAL
@@ -2407,7 +2524,7 @@ class DetailedReportWindow(tk.Toplevel):
         # Add Distance Text (White/Blue)
         mid_x_cd = (cx + dx) / 2
         mid_y_cd = (y_c + y_d) / 2
-        ax3.text(mid_x_cd, mid_y_cd, f"{m_pel_wd:.1f}mm", 
+        ax3.text(mid_x_cd, mid_y_cd, f"{abs(h_diff_mm):.1f}mm", 
                 color='white', fontsize=10, fontweight='bold', ha='center',
                 bbox=dict(facecolor='blue', edgecolor='none', alpha=0.7))
         
@@ -2416,7 +2533,8 @@ class DetailedReportWindow(tk.Toplevel):
         ax3.set_ylim(min_y - 2, max_y + 2)
         ax3.set_xlim(0, 10)
         ax3.set_title('Pelvis', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax3.legend(loc='upper right')
+        self._add_view_legend(ax3)
+        self._add_lateral_direction_indicators(ax3)
 
 
         # 4. LEG E-F-G VERTICAL
@@ -2475,7 +2593,8 @@ class DetailedReportWindow(tk.Toplevel):
         
         set_dynamic_xlim(ax4, [e_x, f_x, g_x])
         ax4.set_title('Leg', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax4.legend(loc='upper right')
+        self._add_view_legend(ax4)
+        self._add_lateral_direction_indicators(ax4)
 
         plt.tight_layout()
 
@@ -2517,7 +2636,7 @@ class DetailedReportWindow(tk.Toplevel):
             ax.set_xlim(center - limit, center + limit)
 
         # 1. SHOULDER
-        ax1 = fig.add_subplot(411, facecolor='white')
+        ax1 = fig.add_subplot(311, facecolor='white')
         ax1.set_xlim(0, 10)
         ax1.set_ylim(0, 10)
         ax1.grid(True, alpha=0.3)
@@ -2527,10 +2646,10 @@ class DetailedReportWindow(tk.Toplevel):
         y_end = 5 + (x_end - 5) * np.tan(angle_rad)
         ax1.plot([2, x_end], [5, y_end], 'r-', linewidth=4, label=f'Shoulder: {shoulder_diff:.1f}mm')
         ax1.set_title('SHOULDER ALIGNMENT', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax1.legend(loc='lower right')
+        self._add_view_legend(ax1)
 
         # 2. PELVIS
-        ax2 = fig.add_subplot(412, facecolor='white')
+        ax2 = fig.add_subplot(312, facecolor='white')
         ax2.set_xlim(0, 10)
         ax2.set_ylim(0, 10)
         ax2.grid(True, alpha=0.3)
@@ -2540,70 +2659,64 @@ class DetailedReportWindow(tk.Toplevel):
         hip_y_end = 5 + (hip_x_end - 5) * np.tan(hip_angle_rad)
         ax2.plot([2, hip_x_end], [5, hip_y_end], 'b-', linewidth=4, label=f'Pelvis: {hip_diff:.1f}mm')
         ax2.set_title('PELVIS ALIGNMENT', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax2.legend(loc='lower right')
+        self._add_view_legend(ax2)
 
-        # 3. RIGHT LEG (C-E-G)
-        ax3 = fig.add_subplot(413, facecolor='white')
+        # 3. LEG ALIGNMENT (Combined)
+        ax3 = fig.add_subplot(313, facecolor='white')
         ax3.set_ylim(0, 10)
         ax3.grid(True, alpha=0.3)
-        ax3.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
         
-        c_x = 5
-        e_x = 5
-        g_x = 5
+        c_right = 3
+        c_left = 7
         
+        ax3.plot([c_right, c_right], [1, 9], 'k--', linewidth=2, label='R.Neutral')
+        ax3.plot([c_left, c_left], [1, 9], 'k--', linewidth=2, label='L.Neutral')
+        
+        c_x = c_right; e_x = c_right; g_x = c_right # Right
+        d_x = c_left; f_x = c_left; h_x = c_left # Left
+        
+        # RIGHT LEG
         if rc and re and rg:
-            # Shift in mm
-            scale = 1.0 / 120.0 # 1 unit = 120mm (adjusted for realistic aspect ratio)
+            scale = 1.0 / 120.0 
             dx_ce = (re['x'] - rc['x']) * mm_px
             dx_eg = (rg['x'] - rc['x']) * mm_px
+            e_x = c_right + (dx_ce * scale)
+            g_x = c_right + (dx_eg * scale)
             
-            e_x = 5 + (dx_ce * scale)
-            g_x = 5 + (dx_eg * scale)
-            
-        ax3.plot(c_x, 9, 'go', markersize=10, label='C (Hip)')
-        ax3.plot(e_x, 5, 'go', markersize=10, label='E (Knee)')
-        ax3.plot(g_x, 1, 'go', markersize=10, label='G (Ankle)')
-        ax3.plot([c_x, e_x], [9, 5], 'g-', linewidth=3, label='Alignment')
-        ax3.plot([e_x, g_x], [5, 1], 'g-', linewidth=3)
-        ax3.text(c_x + 0.2, 9, 'C', fontsize=10, fontweight='bold')
-        ax3.text(e_x + 0.2, 5, 'E', fontsize=10, fontweight='bold')
-        ax3.text(g_x + 0.2, 1, 'G', fontsize=10, fontweight='bold')
-        
-        set_dynamic_xlim(ax3, [c_x, e_x, g_x])
-        ax3.set_title('RIGHT LEG ALIGNMENT (C-E-G)', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax3.legend(loc='lower right')
+            ax3.plot(c_x, 9, 'go', markersize=10, label='C (R.Hip)')
+            ax3.plot(e_x, 5, 'go', markersize=10, label='E (R.Knee)')
+            ax3.plot(g_x, 1, 'go', markersize=10, label='G (R.Ankle)')
+            ax3.plot([c_x, e_x], [9, 5], 'g-', linewidth=3, label='Right Leg')
+            ax3.plot([e_x, g_x], [5, 1], 'g-', linewidth=3)
+            ax3.text(c_x + 0.2, 9, 'C', fontsize=10, fontweight='bold', color='green')
+            ax3.text(e_x + 0.2, 5, 'E', fontsize=10, fontweight='bold', color='green')
+            ax3.text(g_x + 0.2, 1, 'G', fontsize=10, fontweight='bold', color='green')
 
-        # 4. LEFT LEG (D-F-H)
-        ax4 = fig.add_subplot(414, facecolor='white')
-        ax4.set_ylim(0, 10)
-        ax4.grid(True, alpha=0.3)
-        ax4.plot([5, 5], [1, 9], 'k--', linewidth=2, label='Center')
-        
-        d_x = 5
-        f_x = 5
-        h_x = 5
-        
+        # LEFT LEG
         if ld and lf and lh:
-             scale = 1.0 / 120.0 # 1 unit = 120mm
+             scale = 1.0 / 120.0 
              dx_df = (lf['x'] - ld['x']) * mm_px
              dx_fh = (lh['x'] - ld['x']) * mm_px
              
-             f_x = 5 + (dx_df * scale)
-             h_x = 5 + (dx_fh * scale)
+             f_x = c_left + (dx_df * scale)
+             h_x = c_left + (dx_fh * scale)
              
-        ax4.plot(d_x, 9, 'mo', markersize=10, label='D (Hip)')
-        ax4.plot(f_x, 5, 'mo', markersize=10, label='F (Knee)')
-        ax4.plot(h_x, 1, 'mo', markersize=10, label='H (Ankle)')
-        ax4.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Alignment')
-        ax4.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
-        ax4.text(d_x + 0.2, 9, 'D', fontsize=10, fontweight='bold')
-        ax4.text(f_x + 0.2, 5, 'F', fontsize=10, fontweight='bold')
-        ax4.text(h_x + 0.2, 1, 'H', fontsize=10, fontweight='bold')
+             ax3.plot(d_x, 9, 'mo', markersize=10, label='D (L.Hip)')
+             ax3.plot(f_x, 5, 'mo', markersize=10, label='F (L.Knee)')
+             ax3.plot(h_x, 1, 'mo', markersize=10, label='H (L.Ankle)')
+             ax3.plot([d_x, f_x], [9, 5], 'm-', linewidth=3, label='Left Leg')
+             ax3.plot([f_x, h_x], [5, 1], 'm-', linewidth=3)
+             ax3.text(d_x - 0.4, 9, 'D', fontsize=10, fontweight='bold', color='magenta')
+             ax3.text(f_x - 0.4, 5, 'F', fontsize=10, fontweight='bold', color='magenta')
+             ax3.text(h_x - 0.4, 1, 'H', fontsize=10, fontweight='bold', color='magenta')
+
+        # Set limits
+        all_xs = [c_x, e_x, g_x, d_x, f_x, h_x, c_right, c_left]
+        min_x, max_x = min(all_xs), max(all_xs)
+        ax3.set_xlim(min_x - 1, max_x + 1)
         
-        set_dynamic_xlim(ax4, [d_x, f_x, h_x])
-        ax4.set_title('LEFT LEG ALIGNMENT (D-F-H)', fontsize=16, fontweight='bold', pad=10, color='white')
-        ax4.legend(loc='lower right')
+        ax3.set_title('LEG ALIGNMENT (Combined)', fontsize=16, fontweight='bold', pad=10, color='white')
+        self._add_view_legend(ax3)
 
         plt.tight_layout()
 

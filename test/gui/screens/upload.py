@@ -51,6 +51,8 @@ class UploadScreen(ttk.Frame):
             # Trigger re-centering of image
             self._display_preview(self.image_path)
 
+
+
     def _create_widgets(self):
         main_container = tk.Frame(self, bg='#000000')
         main_container.pack(fill=tk.BOTH, expand=True)
@@ -58,24 +60,22 @@ class UploadScreen(ttk.Frame):
         # Header dengan logo dan title
         header = tk.Frame(main_container, bg='#000000', height=80)
         header.pack(fill=tk.X, padx=40, pady=(10, 5))
+
+        # PATIENT INFO INPUTS (NEW)
+        patient_info_frame = tk.Frame(main_container, bg='#000000')
+        patient_info_frame.pack(fill=tk.X, padx=40, pady=(0, 10))
         
-        # ... (Rest of header code skipped for brevity, keeping surrounding context) ...
-        # (Wait, I need to insert the checkbox near the button, which is further down in _create_widgets)
-        # I will split this into two edits to be safe.
-        # First edit: Add initialization and style.
-
-        """Handle canvas resize event"""
-        if hasattr(self, 'image_path') and self.image_path:
-            # Trigger re-centering of image
-            self._display_preview(self.image_path)
-
-    def _create_widgets(self):
-        main_container = tk.Frame(self, bg='#000000')
-        main_container.pack(fill=tk.BOTH, expand=True)
-
-        # Header dengan logo dan title
-        header = tk.Frame(main_container, bg='#000000', height=80)
-        header.pack(fill=tk.X, padx=40, pady=(10, 5))
+        # Name Input
+        tk.Label(patient_info_frame, text="Patient Name:", font=('Arial', 10), bg='#000000', fg='#FFFFFF').pack(side=tk.LEFT, padx=(0, 5))
+        self.patient_name_var = tk.StringVar()
+        entry_name = tk.Entry(patient_info_frame, textvariable=self.patient_name_var, font=('Arial', 10), width=20)
+        entry_name.pack(side=tk.LEFT, padx=(0, 20))
+        
+        # Height Input
+        tk.Label(patient_info_frame, text="Height (cm):", font=('Arial', 10), bg='#000000', fg='#FFFFFF').pack(side=tk.LEFT, padx=(0, 5))
+        self.patient_height_var = tk.StringVar()
+        entry_height = tk.Entry(patient_info_frame, textvariable=self.patient_height_var, font=('Arial', 10), width=10)
+        entry_height.pack(side=tk.LEFT)
 
         logo_path = os.path.join(os.path.dirname(__file__), '../../assets/logo.png')
         if os.path.exists(logo_path):
@@ -851,19 +851,39 @@ class UploadScreen(ttk.Frame):
         if self.analyzing:
             return
 
+        # Validate Patient Info
+        patient_name = self.patient_name_var.get().strip()
+        patient_height_str = self.patient_height_var.get().strip()
+        
+        if not patient_name:
+             messagebox.showerror("Error", "Please enter Patient Name")
+             return
+             
+        try:
+             height_cm = float(patient_height_str)
+             if height_cm <= 0: raise ValueError
+        except ValueError:
+             messagebox.showerror("Error", "Please enter a valid Height (cm)")
+             return
+
         self.analyzing = True
         self.analyze_button.config(state=tk.DISABLED, text="⏳ ANALYZING...")
         self.status_label.config(text="⏳ Analyzing posture with high precision... Please wait")
+        
+        patient_data = {
+            'name': patient_name,
+            'height_cm': height_cm
+        }
 
-        threading.Thread(target=self._analyze_thread, daemon=True).start()
+        threading.Thread(target=self._analyze_thread, args=(patient_data,), daemon=True).start()
 
-    def _analyze_thread(self):
+    def _analyze_thread(self, patient_data):
         try:
             # 1. Call API for analysis
             response = self.api_client.analyze_posture(
                 self.image_path,
-                self.app.patient_data['name'],
-                self.app.patient_data['height_cm'],
+                patient_data['name'],
+                patient_data['height_cm'],
                 self.confidence_threshold
             )
             

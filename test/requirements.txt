@@ -6,6 +6,8 @@ torchvision==0.16.0
 ultralytics==8.3.40
 scipy==1.11.3
 Pillow==10.1.0
+passlib>=1.7.4
+bcrypt==4.0.1
 
 # API Dependencies
 fastapi==0.104.1
@@ -15,6 +17,7 @@ pydantic==2.5.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.0
+psycopg2-binary==2.9.9
 
 # Database
 # sqlite3 is included in python standard library

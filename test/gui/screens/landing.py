@@ -11,9 +11,13 @@ class LandingScreen(ttk.Frame):
         self.parent = parent
         self.pack(fill=tk.BOTH, expand=True)
         self.configure(style='Black.TFrame')
+        
+        # Initialize Database
+        from api.services.database import DatabaseService
+        self.db = DatabaseService()
 
-        self.patient_name = tk.StringVar()
-        self.patient_height = tk.StringVar()
+        self.username = tk.StringVar()
+        self.password = tk.StringVar()
 
         # Path untuk logo
         self.base_dir = os.path.dirname(__file__)
@@ -143,7 +147,7 @@ class LandingScreen(ttk.Frame):
         name_section.pack(fill=tk.X, padx=60, pady=(0, 30))
         
         name_label = tk.Label(name_section,
-                             text="Name",
+                             text="Username",
                              font=('Arial', 16),
                              bg='#E6E6FA',
                              fg='#000000')
@@ -174,7 +178,7 @@ class LandingScreen(ttk.Frame):
         name_entry_frame.place(x=20, y=10, width=760, height=40)
         
         name_entry = tk.Entry(name_entry_frame,
-                             textvariable=self.patient_name,
+                             textvariable=self.username,
                              font=('Arial', 16),
                              bg='#FFFFFF',
                              fg='#000000',
@@ -187,7 +191,7 @@ class LandingScreen(ttk.Frame):
         height_section.pack(fill=tk.X, padx=60, pady=(0, 40))
         
         height_label = tk.Label(height_section,
-                               text="Height (cm)",
+                               text="Password",
                                font=('Arial', 16),
                                bg='#E6E6FA',
                                fg='#000000')
@@ -218,7 +222,8 @@ class LandingScreen(ttk.Frame):
         height_entry_frame.place(x=20, y=10, width=760, height=40)
         
         height_entry = tk.Entry(height_entry_frame,
-                               textvariable=self.patient_height,
+                               textvariable=self.password,
+                               show="*",
                                font=('Arial', 16),
                                bg='#FFFFFF',
                                fg='#000000',
@@ -262,6 +267,29 @@ class LandingScreen(ttk.Frame):
                                  command=self._on_submit)
         submit_button.place(x=0, y=0, width=200, height=60)
 
+        # Register link
+        register_frame = tk.Frame(form_inner, bg='#E6E6FA')
+        register_frame.pack(pady=(20, 0))
+        
+        register_label = tk.Label(register_frame, 
+                                text="Don't have an account?", 
+                                font=('Arial', 12),
+                                bg='#E6E6FA',
+                                fg='#000000')
+        register_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        register_button = tk.Button(register_frame,
+                                  text="Register",
+                                  font=('Arial', 12, 'bold'),
+                                  bg='#E6E6FA',
+                                  fg='#1E90FF',
+                                  bd=0,
+                                  cursor='hand2',
+                                  activebackground='#E6E6FA',
+                                  activeforeground='#1C86EE',
+                                  command=self._on_register)
+        register_button.pack(side=tk.LEFT)
+
     def _create_rounded_rectangle(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
         """Membuat rectangle dengan rounded corners"""
         points = [
@@ -282,32 +310,158 @@ class LandingScreen(ttk.Frame):
         return canvas.create_polygon(points, **kwargs, smooth=True)
 
     def _on_submit(self):
-        name = self.patient_name.get().strip()
-        height = self.patient_height.get().strip()
+        username = self.username.get().strip()
+        password = self.password.get().strip()
 
-        if not name:
-            messagebox.showerror("Error", "Please enter patient name")
+        if not username:
+            messagebox.showerror("Error", "Please enter username")
             return
 
-        if not height:
-            messagebox.showerror("Error", "Please enter patient height")
+        if not password:
+            messagebox.showerror("Error", "Please enter password")
             return
 
+        # Login Logic
+        user = self.db.verify_patient(username, password)
+        if user:
+            # Login successful
+            # We pass the user data to the app, but UploadScreen will ask for Subject details separately
+            self.app.show_upload_screen(user)
+        else:
+            messagebox.showerror("Login Failed", "Invalid username or password")
+            
+    def _on_register(self):
+        self.app.show_registration_screen()
+
+
+class RegistrationScreen(LandingScreen):
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+    
+    def _create_right_panel(self, parent):
+        """Panel kanan dengan form registrasi - Override"""
+        # Container utama
+        main_content = tk.Frame(parent, bg='#000000')
+        main_content.pack(expand=True, fill=tk.BOTH)
+        
+        # Title
+        title_frame = tk.Frame(main_content, bg='#000000')
+        title_frame.pack(pady=(0, 30))
+        
+        title_label = tk.Label(title_frame,
+                              text="REGISTRATION",
+                              font=('Arial', 44, 'bold'),
+                              fg='#FFFFFF',
+                              bg='#000000')
+        title_label.pack()
+
+        form_container = tk.Frame(main_content, bg='#E6E6FA', bd=0)
+        form_container.pack(fill=tk.BOTH, expand=True, padx=20)
+
+        form_inner = tk.Frame(form_container, bg='#E6E6FA')
+        form_inner.pack(expand=True, pady=40)
+
+        # Username Section
+        self._create_input_field(form_inner, "Username", self.username, False)
+        
+        # Password Section
+        self._create_input_field(form_inner, "Password", self.password, True)
+
+        # Register Button
+        button_container = tk.Frame(form_inner, bg='#E6E6FA')
+        button_container.pack(pady=(20, 0))
+        
+        # Submit Button (Register)
+        reg_btn_canvas = tk.Canvas(button_container, bg='#E6E6FA', height=60, width=200, highlightthickness=0)
+        reg_btn_canvas.pack()
+        reg_btn_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: self._create_rounded_rectangle(
+            reg_btn_canvas, x1, y1, x2, y2, radius, **kwargs
+        )
+        reg_btn_canvas.create_rounded_rectangle(0, 0, 200, 60, 15, fill='#1E90FF', outline='#1E90FF', width=1)
+        
+        register_button = tk.Button(button_container,
+                                 text="Register",
+                                 font=('Arial', 16, 'bold'),
+                                 bg='#1E90FF',
+                                 fg='#FFFFFF',
+                                 bd=0,
+                                 activebackground='#1C86EE',
+                                 activeforeground='#FFFFFF',
+                                 command=self._on_register_submit)
+        register_button.place(x=0, y=0, width=200, height=60)
+
+        # Back to Login link
+        login_frame = tk.Frame(form_inner, bg='#E6E6FA')
+        login_frame.pack(pady=(20, 0))
+        
+        login_label = tk.Label(login_frame, 
+                             text="Already have an account?", 
+                             font=('Arial', 12),
+                             bg='#E6E6FA',
+                             fg='#000000')
+        login_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        login_button = tk.Button(login_frame,
+                               text="Login",
+                               font=('Arial', 12, 'bold'),
+                               bg='#E6E6FA',
+                               fg='#1E90FF',
+                               bd=0,
+                               cursor='hand2',
+                               activebackground='#E6E6FA',
+                               activeforeground='#1C86EE',
+                               command=lambda: self.app.show_landing_screen())
+        login_button.pack(side=tk.LEFT)
+
+    def _create_input_field(self, parent, label_text, variable, is_password):
+        section = tk.Frame(parent, bg='#E6E6FA')
+        section.pack(fill=tk.X, padx=60, pady=(0, 20))
+        
+        label = tk.Label(section, text=label_text, font=('Arial', 16), bg='#E6E6FA', fg='#000000')
+        label.pack(anchor=tk.W, pady=(0, 10))
+
+        entry_container = tk.Frame(section, bg='#E6E6FA')
+        entry_container.pack(fill=tk.X)
+        
+        bg_canvas = tk.Canvas(entry_container, bg='#E6E6FA', height=60, highlightthickness=0)
+        bg_canvas.pack(fill=tk.X)
+        bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: self._create_rounded_rectangle(
+            bg_canvas, x1, y1, x2, y2, radius, **kwargs
+        )
+        bg_canvas.create_rounded_rectangle(0, 0, 800, 60, 15, fill='#FFFFFF', outline='#CCCCCC', width=1)
+        
+        entry_frame = tk.Frame(entry_container, bg='#FFFFFF', bd=0, highlightthickness=0)
+        entry_frame.place(x=20, y=10, width=760, height=40)
+        
+        entry = tk.Entry(entry_frame, textvariable=variable, font=('Arial', 16), bg='#FFFFFF', fg='#000000', bd=0, relief=tk.FLAT)
+        if is_password:
+            entry.config(show="*")
+        entry.pack(fill=tk.BOTH, expand=True, padx=10)
+
+    def _on_register_submit(self):
+        username = self.username.get().strip()
+        password = self.password.get().strip()
+        
+        if not username or not password:
+            messagebox.showerror("Error", "Please fill all fields")
+            return
+            
         try:
-            height_value = float(height)
-            if height_value <= 0 or height_value > 300:
-                messagebox.showerror("Error", "Height must be between 1-300 cm")
-                return
-        except ValueError:
-            messagebox.showerror("Error", "Please enter a valid height in cm")
-            return
-
-        patient_data = {
-            'name': name,
-            'height_cm': height_value
-        }
-
-        self.app.show_upload_screen(patient_data)
+            # Default height to 0 for doctor accounts/users
+            self.db.create_patient(username, 0.0, password)
+            messagebox.showinfo("Success", "Registration successful! Please login.")
+            self.app.show_landing_screen()
+        except tk.TclError as e:
+             # Handle unique constraint violation or DB errors
+             if "UNIQUE constraint failed" in str(e) or "already exists" in str(e):
+                 messagebox.showerror("Error", "Username already taken")
+             else:
+                 messagebox.showerror("Error", f"Registration failed: {str(e)}")
+        except Exception as e:
+            if "UNIQUE constraint failed" in str(e) or "already exists" in str(e):
+                 messagebox.showerror("Error", "Username already taken")
+            else:
+                 messagebox.showerror("Error", f"Registration failed: {str(e)}")
 
 
 class App:
@@ -329,6 +483,12 @@ class App:
         
         # Tampilkan landing screen
         self.landing_screen = LandingScreen(self.container, self)
+    
+    def show_registration_screen(self):
+        """Menampilkan registration screen"""
+        for widget in self.container.winfo_children():
+            widget.destroy()
+        self.registration_screen = RegistrationScreen(self.container, self)
     
     def show_upload_screen(self, patient_data):
         """Menampilkan upload screen"""
