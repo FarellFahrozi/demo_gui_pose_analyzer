@@ -7,6 +7,7 @@ test/
 ├── SETUP_GUIDE.md                     # Detailed setup instructions
 ├── QUICKSTART.md                      # 5-minute quick start guide
 ├── PROJECT_STRUCTURE.md               # This file
+├── MEDICAL_FORMULAS.md                # Detailed explanation of biomechanical formulas
 ├── DEPLOYMENT_COMPLETE.md             # Recent improvements and version info
 ├── BATCH_EXPORT_TUTORIAL.md           # Tutorial for Batch CSV Export
 ├── requirements.txt                   # Python dependencies
@@ -154,11 +155,11 @@ Previously contained debug tools (`probe_lateral_indices.py`, `debug_yolo.py`) w
 - **Alignment**: Corrected G point and Head (A-B) verticality
 - **UI**: Simplified status text and clear Titles (Head, Spine, Pelvis, Leg)
 
-### Phase 15: Stability
-- Fixed 500 error in lateral analysis
-- Improved error handling
+### Phase 20: Biomechanical Precision
+- **FORMULAS**: Added `MEDICAL_FORMULAS.md` detailing the algorithms.
+- **Pelvic Accuracy**: Realistic 12° tilt, symmetric offset, and height-diff based reporting.
 
 ## Version
 
-**Current Version**: 2.0.0  
+**Current Version**: 2.1.0  
 **Status**: Production Ready

@@ -121,6 +121,12 @@ The system uses **SQLite** (`kuro_posture.db`) with the following tables:
   - **Smart ID**: Dataset ID combines Folder Name + Filename.
 - **Codebase Cleanup**: Removed redundant debug scripts for a cleaner project structure.
 
+### Phase 20: Advanced Biomechanics (Current)
+- **Geometric View Detection**: Robust Left/Right determination comparing Ear vs Hip keypoints.
+- **Realistic Pelvic Tilt**: Updated logic to use **12° angle** for medically accurate visualization (<100mm height diff).
+- **Symmetric Centering**: Points C and D are now perfectly centered around the Hip (E).
+- **Documentation**: Detailed formula explanations in [MEDICAL_FORMULAS.md](MEDICAL_FORMULAS.md).
+
 ## Development
 
 ### Running in VSCode
