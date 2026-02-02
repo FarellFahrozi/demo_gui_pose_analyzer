@@ -23,7 +23,7 @@ class UploadScreen(ttk.Frame):
         self.parent = parent
         self.pack(fill=tk.BOTH, expand=True)
 
-        self.api_client = ApiClient()
+        self.api_client = self.app.api_client
         self.image_path = None
         self.batch_images = []
         self.current_batch_index = 0
@@ -317,22 +317,43 @@ class UploadScreen(ttk.Frame):
             threading.Thread(target=self._load_specific_model, args=(file_path,), daemon=True).start()
 
     def _check_api_health(self):
-        threading.Thread(target=self._check_api_health_thread, daemon=True).start()
+        self.model_status_label.config(text="API: Checking...", fg='#FFCC00')
+        threading.Thread(target=self._check_api_health_background, daemon=True).start()
 
-    def _check_api_health_thread(self):
-        self.parent.after(0, lambda: self.model_status_label.config(text="API: Checking...", fg='#FFCC00'))
+    def _check_api_health_background(self):
         is_healthy = self.api_client.health_check()
-        self.api_connected = is_healthy
+        self.parent.after(0, lambda: self._update_api_ui(is_healthy))
+
+    def _update_api_ui(self, is_connected):
+        self.api_connected = is_connected
         
-        if is_healthy:
-            self.parent.after(0, lambda: self.model_status_label.config(text="API: Connected", fg='#00FF00'))
-            self.parent.after(0, lambda: self.status_label.config(text="API Server Ready. Click 'ANALYSIS MENU' to select image."))
+        if is_connected:
+            self.model_status_label.config(text="API: Connected", fg='#00FF00')
+            self.status_label.config(text="API Server Ready. Click 'ANALYSIS MENU' to select image.")
+            
             if self.image_path:
-                self.parent.after(0, lambda: self.analyze_button.config(state=tk.NORMAL))
+                self.analyze_button.config(state=tk.NORMAL)
+                self.analyze_button.config(text="🔍 ANALYZE POSTURE")
+            
+            # Remove retry button if exists
+            if hasattr(self, 'retry_btn') and self.retry_btn:
+                self.retry_btn.destroy()
+                self.retry_btn = None
         else:
-            self.parent.after(0, lambda: self.model_status_label.config(text="API: Disconnected", fg='#FF6666'))
-            self.parent.after(0, lambda: self.status_label.config(text="⚠️ API Server Offline. Please run 'python run_api.py' first."))
-            self.parent.after(0, lambda: self.analyze_button.config(state=tk.DISABLED))
+            self.model_status_label.config(text="API: Disconnected", fg='#FF6666')
+            self.status_label.config(text="⚠️ API Server Offline. Please run 'python run_api.py'.")
+            self.analyze_button.config(state=tk.DISABLED)
+            
+            # Create retry button if not exists
+            if not hasattr(self, 'retry_btn') or self.retry_btn is None:
+                # Use analyze_button container (master)
+                btn_container = self.analyze_button.master
+                self.retry_btn = tk.Button(btn_container, 
+                                         text="🔄 Retry Connection", 
+                                         font=('Arial', 12, 'bold'),
+                                         bg='#FFDD00', fg='#000000',
+                                         command=self._check_api_health)
+                self.retry_btn.pack(pady=5)
 
 
     def _load_specific_model(self, model_path):

@@ -104,7 +104,7 @@ python run_api.py
 - **B-E-F Plumb Line**: Pelvic center (E) vertically aligned with shoulder (B) and knee (F)
 - **30° Pelvic Tilt**: C-D line slanted to represent anterior tilt
 - **BBox Clipping**: All keypoints confined to person's body area
-- **Enhanced Graphs**: Detailed lateral plots (Head, Spine, Pelvis, Leg) with legends and mm annotations
+- **Enhanced Graphs**: Detailed lateral plots (Head, Spine, Pelvic, Leg) with legends and mm annotations
 
 ### Streamlined Reporting
 - Clean data tables with essential metrics

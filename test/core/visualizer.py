@@ -106,8 +106,14 @@ def visualize_just_imbalance(image, analysis_results):
         cv2.line(img_copy, (ls_x, ls_y), (rs_x, rs_y), (0, 0, 255), 3)
 
         shoulder_diff = analysis_results.get('shoulder', {}).get('height_difference_mm', 0)
-        cv2.putText(img_copy, f"Shoulder: {shoulder_diff:.1f}mm",
+        shoulder_width = analysis_results.get('shoulder', {}).get('width_mm', 0)
+        
+        # Height Diff
+        cv2.putText(img_copy, f"H-Diff (A-B): {shoulder_diff:.1f}mm",
                    (ls_x - 50, ls_y - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        # Distance (Width A-B)
+        cv2.putText(img_copy, f"Distance (A-B): {shoulder_width:.1f}mm",
+                   (ls_x - 100, ls_y - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 165, 0), 2)
 
     left_ear = keypoints_dict.get('left_ear')
     right_ear = keypoints_dict.get('right_ear')
@@ -120,6 +126,24 @@ def visualize_just_imbalance(image, analysis_results):
         head_tilt = head_data.get('tilt_angle', 0)
         cv2.putText(img_copy, f"Head Tilt: {head_tilt:.1f}deg",
                    (le_x - 50, le_y - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+
+    left_hip = keypoints_dict.get('left_hip')
+    right_hip = keypoints_dict.get('right_hip')
+    if left_hip and right_hip:
+        lh_x, lh_y = int(left_hip['x']), int(left_hip['y'])
+        rh_x, rh_y = int(right_hip['x']), int(right_hip['y'])
+        cv2.line(img_copy, (lh_x, lh_y), (rh_x, rh_y), (0, 255, 0), 3)
+
+        hip_diff = analysis_results.get('hip', {}).get('height_difference_mm', 0)
+        hip_width = analysis_results.get('hip', {}).get('width_mm', 0)
+
+        # Height Diff
+        cv2.putText(img_copy, f"H-Diff (C-D): {hip_diff:.1f}mm",
+                   (lh_x - 50, lh_y - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        # Distance (Width C-D)
+        cv2.putText(img_copy, f"Distance (C-D): {hip_width:.1f}mm",
+                   (lh_x - 100, lh_y - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 165, 0), 2)
 
     return img_copy
 

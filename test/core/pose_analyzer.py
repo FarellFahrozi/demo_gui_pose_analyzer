@@ -177,7 +177,7 @@ class AdvancedPoseAnalyzer:
             self._enforce_anatomical_completeness(keypoints_dict)
             self._add_midpoints(keypoints_dict)
             
-        # 4b. Lateral Corrections (Pelvis Fix, Leg Alignment)
+        # 4b. Lateral Corrections (Pelvic Fix, Leg Alignment)
         else:
             self._correct_lateral_points(keypoints_dict, person_bbox, view_type)
             
@@ -186,7 +186,7 @@ class AdvancedPoseAnalyzer:
 
     def _correct_lateral_points(self, keypoints_dict, person_bbox, view_type):
         """
-        Rumus 2: Lateral Correction (Pelvis Centering & Leg Alignment)
+        Rumus 2: Lateral Correction (Pelvic Centering & Leg Alignment)
         """
         # Get Keypoints with safe access
         def get_k(n): return keypoints_dict.get(f"lateral_{n}")
@@ -197,7 +197,7 @@ class AdvancedPoseAnalyzer:
         kn = get_k('knee')
         ank = get_k('ankle')
         
-        # 1. Pelvis Center Correction (Use Hip, Not Shoulder)
+        # 1. Pelvic Center Correction (Use Hip, Not Shoulder)
         if pb:
              # Use detected Hip X
              e_x = pb['x']
@@ -807,7 +807,7 @@ class AdvancedPoseAnalyzer:
         angle = math.degrees(math.atan2(abs(dy), abs(dx)))
         return abs(angle)
 
-    def analyze_shoulder_imbalance_advanced(self, keypoints):
+    def analyze_shoulder_imbalance_advanced(self, keypoints, plumb_line_x=None):
         left_shoulder = keypoints.get('left_shoulder')
         right_shoulder = keypoints.get('right_shoulder')
 
@@ -861,11 +861,18 @@ class AdvancedPoseAnalyzer:
             results['asymmetry_score'] = round((height_score * 0.6 + angle_score * 0.4), 2)
             results['score'] = results['asymmetry_score']
 
-            # Calculate Shoulder Width (A to B)
+            # Calculate Shoulder Shift (Horizontal A to B)
             results['width_mm'] = 0
             if self.pixel_to_mm_ratio:
-                dist_px = self._distance(left_shoulder, right_shoulder)
+                dist_px = abs(left_shoulder['x'] - right_shoulder['x'])
                 results['width_mm'] = round(dist_px * self.pixel_to_mm_ratio, 2)
+                
+                # Calculate Lateral Shift (Displacement from center)
+                results['lateral_shift_mm'] = 0
+                if plumb_line_x is not None:
+                    mid_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+                    shift_px = mid_x - plumb_line_x
+                    results['lateral_shift_mm'] = round(shift_px * self.pixel_to_mm_ratio, 2)
 
             if results['height_difference_mm'] < 5 and abs(results['slope_angle_deg']) < 2:
                 results['status'] = 'Very Balanced'
@@ -882,7 +889,7 @@ class AdvancedPoseAnalyzer:
 
         return results
 
-    def analyze_hip_imbalance_advanced(self, keypoints):
+    def analyze_hip_imbalance_advanced(self, keypoints, plumb_line_x=None):
         left_hip = keypoints.get('left_hip')
         right_hip = keypoints.get('right_hip')
 
@@ -934,11 +941,18 @@ class AdvancedPoseAnalyzer:
             results['asymmetry_score'] = round((height_score * 0.7 + angle_score * 0.3), 2)
             results['score'] = results['asymmetry_score']
 
-            # Calculate Hip Width (C to D)
+            # Calculate Pelvic Shift (Horizontal C to D)
             results['width_mm'] = 0
             if self.pixel_to_mm_ratio:
-                dist_px = self._distance(left_hip, right_hip)
+                dist_px = abs(left_hip['x'] - right_hip['x'])
                 results['width_mm'] = round(dist_px * self.pixel_to_mm_ratio, 2)
+                
+                # Calculate Lateral Shift (Displacement from center)
+                results['lateral_shift_mm'] = 0
+                if plumb_line_x is not None:
+                    mid_x = (left_hip['x'] + right_hip['x']) / 2
+                    shift_px = mid_x - plumb_line_x
+                    results['lateral_shift_mm'] = round(shift_px * self.pixel_to_mm_ratio, 2)
 
             if results['height_difference_mm'] < 5 and abs(results['pelvic_tilt_angle']) < 2:
                 results['status'] = 'Very Balanced'
@@ -1355,19 +1369,19 @@ class AdvancedPoseAnalyzer:
         
         # A to B (Head Shift)
         if ear and sh:
-            dist_px = self._distance(ear, sh)
+            dist_px = abs(ear['x'] - sh['x'])
             results['head_shift_mm'] = round(dist_px * ratio, 2)
             results['ear_to_shoulder_mm'] = results['head_shift_mm']
         
         # B to E (Spine Shift)
         if sh and p_center:
-            dist_px = self._distance(sh, p_center)
+            dist_px = abs(sh['x'] - p_center['x'])
             results['spine_shift_mm'] = round(dist_px * ratio, 2)
             results['shoulder_to_pelvic_mm'] = results['spine_shift_mm']
             
         # C to D (Pelvic Shift)
         if p_back and p_front:
-            dist_px = self._distance(p_back, p_front)
+            dist_px = abs(p_back['x'] - p_front['x'])
             results['pelvic_shift_mm'] = round(dist_px * ratio, 2)
             results['pelvic_width_mm'] = results['pelvic_shift_mm']
             

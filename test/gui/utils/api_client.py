@@ -2,8 +2,10 @@ import requests
 import os
 import json
 
+from config import Config
+
 class ApiClient:
-    def __init__(self, base_url="http://127.0.0.1:8000"):
+    def __init__(self, base_url=Config.API_BASE_URL):
         self.base_url = base_url
 
     def health_check(self) -> bool:
@@ -59,3 +61,40 @@ class ApiClient:
             return []
         except:
             return []
+
+    def login(self, username, password):
+        url = f"{self.base_url}/auth/login"
+        payload = {
+            "username": username,
+            "password": password
+        }
+        try:
+            response = requests.post(url, json=payload)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+        except Exception as e:
+            print(f"Login error: {e}")
+            return None
+
+    def register(self, username, height_cm, password):
+        url = f"{self.base_url}/api/patients/"
+        payload = {
+            "name": username,
+            "height_cm": float(height_cm),
+            "password": password
+        }
+        try:
+            response = requests.post(url, json=payload)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                try:
+                    error_detail = response.json().get('detail')
+                    raise Exception(error_detail)
+                except Exception as e:
+                    if str(e) == error_detail: raise
+                    raise Exception(f"Registration failed: {response.text}")
+        except Exception as e:
+            raise e

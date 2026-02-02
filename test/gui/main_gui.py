@@ -9,6 +9,7 @@ from gui.screens.landing import LandingScreen, RegistrationScreen
 # from gui.screens.register import RegisterScreen # Commented out as we are using the one in landing.py
 from gui.screens.upload import UploadScreen
 from gui.screens.results import ResultsScreen, DetailedReportWindow
+from gui.utils.api_client import ApiClient
 
 class PostureAnalysisApp:
     def __init__(self):
@@ -52,6 +53,8 @@ class PostureAnalysisApp:
         self.current_screen = None
         self.patient_data = {}
         self.analysis_data = None
+        
+        self.api_client = ApiClient()
 
         self.show_landing_screen()
 

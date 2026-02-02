@@ -6,14 +6,31 @@
   [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
   [![Framework](https://img.shields.io/badge/Framework-FastAPI%20%26%20Tkinter-orange.svg)](https://fastapi.tiangolo.com/)
   [![AI](https://img.shields.io/badge/AI-YOLOv11-green.svg)](https://ultralytics.com/)
-  [![Database](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](https://www.sqlite.org/)
+  [![Architecture](https://img.shields.io/badge/Architecture-Client--Server-blueviolet.svg)](#)
 </div>
 
 ---
 
 ## 🌟 Overview
 
-The **KURO Performance AI Postural Assessment System** is a professional-grade clinical tool designed to provide precise anatomical measurements using artificial intelligence. By leveraging a custom **8-point YOLO model**, the system automatically detects key anatomical landmarks to calculate biomechanical metrics in real-time, facilitating fast and objective postural evaluations.
+The **KURO Performance AI Postural Assessment System** is a professional-grade clinical tool designed to provide precise anatomical measurements using artificial intelligence. By leveraging a custom **8-point YOLO model**, the system automatically detects key anatomical landmarks to calculate biomechanical metrics in real-time.
+
+### 🏗️ New Clean Architecture (v2.0 Refactor)
+The application has been refactored into a robust **Client-Server Architecture** to ensure scalability and maintainability:
+
+1.  **Backend (API)**: A stateless **FastAPI** server that handles:
+    *   Authentication (Login/Register)
+    *   Patient Data Management
+    *   AI Inference & Image Processing
+    *   Database Interactions (SQLite)
+
+2.  **Frontend (GUI)**: A pure **Tkinter** client that:
+    *   Communicates **exclusively via HTTP API** (No direct DB access).
+    *   Features modular UI components (`ui_helpers.py`).
+    *   Uses a centralized `ApiClient` for all data operations.
+    *   Delegates complex graphing to `plot_helpers.py`.
+
+---
 
 ## ✨ Key Features
 
@@ -44,7 +61,7 @@ The **KURO Performance AI Postural Assessment System** is a professional-grade c
 
 ### 1. Prerequisites
 - **Python 3.10** or higher.
-- NVIDIA GPU (Recommended for faster AI inference, though CPU is supported).
+- NVIDIA GPU (Recommended).
 
 ### 2. Setup
 ```bash
@@ -53,16 +70,37 @@ cd test
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Configure environment (standard defaults are pre-set)
-cp .env.example .env
 ```
 
-### 3. Run the Applications
-| Mode | Command | Use Case |
+### 3. Run the Applications (IMPORTANT)
+Since the architecture is now Client-Server, you **MUST** run the API first, then the GUI.
+
+**Step 1: Start the API Server** (Keep this terminal open)
+```bash
+python run_api.py
+```
+
+**Step 2: Start the Desktop Client** (In a new terminal)
+```bash
+python run_gui.py
+```
+
+| Component | Command | Role |
 | :--- | :--- | :--- |
-| **Desktop GUI** | `python run_gui.py` | Full clinical workflow and visual reports. |
-| **REST API** | `python run_api.py` | Integration and backend analysis. |
+| **Server** | `python run_api.py` | Handles Logic, Database, and AI. Runs on port 8000. |
+| **Client** | `python run_gui.py` | The User Interface. Connects to localhost:8000. |
+
+---
+
+## ⚙️ Configuration
+
+The application uses a centralized configuration file located at `test/config.py`.
+
+```python
+# test/config.py
+class Config:
+    API_BASE_URL = "http://127.0.0.1:8000" # Change this if deploying API to cloud
+```
 
 ---
 
@@ -91,27 +129,25 @@ For lateral (side) views, the system enforces medical postural theory:
 ```text
 .
 ├── test/
-│   ├── api/             # FastAPI implementation & routes
-│   ├── core/            # Biomechanical calculation engine
-│   ├── gui/             # Tkinter screens and UI components
-│   ├── models/          # YOLOv11 .pt models
-│   ├── assets/          # Branding and static resources
-│   ├── results/         # Processed images and CSV reports
-│   ├── scripts/         # Debugging and utility scripts
-│   └── run_*.py         # Entry point scripts
-├── README.md            # Root documentation
-└── .env.example         # Template for environment settings
+│   ├── api/             # FastAPI Backend
+│   │   ├── routes/      # Endpoints (auth, patients, analysis)
+│   │   └── services/    # Business logic (database, ai)
+│   ├── gui/             # Tkinter Client
+│   │   ├── screens/     # Screens (landing, upload, results)
+│   │   └── utils/       # Helpers (api_client, ui_helpers, plot_helpers)
+│   ├── core/            # Core Biomechanics Engine
+│   ├── config.py        # Central Configuration
+│   └── run_*.py         # Entry scripts
+├── README.md            # Documentation
 ```
 
 ---
 
-## ⚒️ Technical Stack
+## 📊 Logic Modules
 
-- **Computer Vision**: Ultralytics YOLOv11
-- **Backend**: FastAPI (Python)
-- **Frontend**: Tkinter (Native Python GUI)
-- **Data Science**: NumPy, SciPy, Matplotlib, OpenCV
-- **Database**: SQLite3
+*   **`gui/utils/ui_helpers.py`**: Contains reusable UI elements like `create_rounded_rect` to ensure consistent design.
+*   **`gui/utils/plot_helpers.py`**: Encapsulates all Matplotlib graph generation logic, keeping `results.py` clean and focused on layout.
+*   **`gui/utils/api_client.py`**: The bridge between Client and Server. Handles Login, Registration, and Data fetching.
 
 ---
 

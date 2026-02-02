@@ -153,7 +153,7 @@ Previously contained debug tools (`probe_lateral_indices.py`, `debug_yolo.py`) w
 ### Phase 18: Visualization & User Experience
 - **Graphs**: Added legends, annotations, and better scaling
 - **Alignment**: Corrected G point and Head (A-B) verticality
-- **UI**: Simplified status text and clear Titles (Head, Spine, Pelvis, Leg)
+- **UI**: Simplified status text and clear Titles (Head, Spine, Pelvic, Leg)
 
 ### Phase 20: Biomechanical Precision
 - **FORMULAS**: Added `MEDICAL_FORMULAS.md` detailing the algorithms.

@@ -26,7 +26,7 @@ We compare the X-coordinate of the Ear keypoint against the Pelvic Center (Hip) 
 The system visualizes the Anterior Pelvic Tilt using Points C (PSIS - Posterior Superior Iliac Spine) and D (ASIS - Anterior Superior Iliac Spine).
 
 ### A. Centering Logic
-To accurately represent the pelvis relative to the hip joint (Point E), we ensure that Point E is the **geometric midpoint** of the segment C-D.
+To accurately represent the pelvic relative to the hip joint (Point E), we ensure that Point E is the **geometric midpoint** of the segment C-D.
 
 *   **Symmetric Offsets**: We use an equal horizontal offset for both points.
 *   **Formula**:
@@ -50,7 +50,7 @@ To avoid exaggerated visualization, we use a medically realistic angle for the d
 ## 3. Measurements Calculation
 
 ### Pelvic Height Difference (Pelvic H-Diff)
-The value displayed on the "Pelvis Analysis" graph represents the vertical height difference between the ASIS and PSIS, which is a key indicator of Pelvic Tilt.
+The value displayed on the "Pelvic Analysis" graph represents the vertical height difference between the ASIS and PSIS, which is a key indicator of Pelvic Tilt.
 
 *   **Formula**: `H_Diff = |C_Y - D_Y| * mm_per_px`
 *   **Unit**: Millimeters (mm)

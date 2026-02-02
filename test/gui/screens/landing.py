@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import os
 
+from gui.utils.ui_helpers import create_rounded_rect
 
 class LandingScreen(ttk.Frame):
     def __init__(self, parent, app):
@@ -12,9 +13,8 @@ class LandingScreen(ttk.Frame):
         self.pack(fill=tk.BOTH, expand=True)
         self.configure(style='Black.TFrame')
         
-        # Initialize Database
-        from api.services.database import DatabaseService
-        self.db = DatabaseService()
+        # Database connection removed in favor of API Client
+        # self.db = DatabaseService()
 
         self.username = tk.StringVar()
         self.password = tk.StringVar()
@@ -165,7 +165,7 @@ class LandingScreen(ttk.Frame):
         name_bg_canvas.pack(fill=tk.X)
         
         # Buat rounded rectangle dengan radius 15px
-        name_bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: self._create_rounded_rectangle(
+        name_bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: create_rounded_rect(
             name_bg_canvas, x1, y1, x2, y2, radius, **kwargs
         )
         name_bg_canvas.create_rounded_rectangle(0, 0, 800, 60, 15, 
@@ -209,7 +209,7 @@ class LandingScreen(ttk.Frame):
         height_bg_canvas.pack(fill=tk.X)
         
         # Buat rounded rectangle dengan radius 15px
-        height_bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: self._create_rounded_rectangle(
+        height_bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: create_rounded_rect(
             height_bg_canvas, x1, y1, x2, y2, radius, **kwargs
         )
         height_bg_canvas.create_rounded_rectangle(0, 0, 800, 60, 15, 
@@ -244,7 +244,7 @@ class LandingScreen(ttk.Frame):
         button_bg_canvas.pack()
         
         # Buat rounded rectangle dengan radius 15px untuk button
-        button_bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: self._create_rounded_rectangle(
+        button_bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: create_rounded_rect(
             button_bg_canvas, x1, y1, x2, y2, radius, **kwargs
         )
         button_bg_canvas.create_rounded_rectangle(0, 0, 200, 60, 15, 
@@ -290,24 +290,7 @@ class LandingScreen(ttk.Frame):
                                   command=self._on_register)
         register_button.pack(side=tk.LEFT)
 
-    def _create_rounded_rectangle(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
-        """Membuat rectangle dengan rounded corners"""
-        points = [
-            x1+radius, y1,
-            x2-radius, y1,
-            x2, y1,
-            x2, y1+radius,
-            x2, y2-radius,
-            x2, y2,
-            x2-radius, y2,
-            x1+radius, y2,
-            x1, y2,
-            x1, y2-radius,
-            x1, y1+radius,
-            x1, y1
-        ]
-        
-        return canvas.create_polygon(points, **kwargs, smooth=True)
+
 
     def _on_submit(self):
         username = self.username.get().strip()
@@ -321,11 +304,12 @@ class LandingScreen(ttk.Frame):
             messagebox.showerror("Error", "Please enter password")
             return
 
-        # Login Logic
-        user = self.db.verify_patient(username, password)
-        if user:
+        # Login Logic via API
+        response = self.app.api_client.login(username, password)
+        
+        if response and response.get('success'):
             # Login successful
-            # We pass the user data to the app, but UploadScreen will ask for Subject details separately
+            user = response.get('user')
             self.app.show_upload_screen(user)
         else:
             messagebox.showerror("Login Failed", "Invalid username or password")
@@ -374,7 +358,7 @@ class RegistrationScreen(LandingScreen):
         # Submit Button (Register)
         reg_btn_canvas = tk.Canvas(button_container, bg='#E6E6FA', height=60, width=200, highlightthickness=0)
         reg_btn_canvas.pack()
-        reg_btn_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: self._create_rounded_rectangle(
+        reg_btn_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: create_rounded_rect(
             reg_btn_canvas, x1, y1, x2, y2, radius, **kwargs
         )
         reg_btn_canvas.create_rounded_rectangle(0, 0, 200, 60, 15, fill='#1E90FF', outline='#1E90FF', width=1)
@@ -425,7 +409,7 @@ class RegistrationScreen(LandingScreen):
         
         bg_canvas = tk.Canvas(entry_container, bg='#E6E6FA', height=60, highlightthickness=0)
         bg_canvas.pack(fill=tk.X)
-        bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: self._create_rounded_rectangle(
+        bg_canvas.create_rounded_rectangle = lambda x1, y1, x2, y2, radius, **kwargs: create_rounded_rect(
             bg_canvas, x1, y1, x2, y2, radius, **kwargs
         )
         bg_canvas.create_rounded_rectangle(0, 0, 800, 60, 15, fill='#FFFFFF', outline='#CCCCCC', width=1)
@@ -448,20 +432,11 @@ class RegistrationScreen(LandingScreen):
             
         try:
             # Default height to 0 for doctor accounts/users
-            self.db.create_patient(username, 0.0, password)
+            self.app.api_client.register(username, 0.0, password)
             messagebox.showinfo("Success", "Registration successful! Please login.")
             self.app.show_landing_screen()
-        except tk.TclError as e:
-             # Handle unique constraint violation or DB errors
-             if "UNIQUE constraint failed" in str(e) or "already exists" in str(e):
-                 messagebox.showerror("Error", "Username already taken")
-             else:
-                 messagebox.showerror("Error", f"Registration failed: {str(e)}")
         except Exception as e:
-            if "UNIQUE constraint failed" in str(e) or "already exists" in str(e):
-                 messagebox.showerror("Error", "Username already taken")
-            else:
-                 messagebox.showerror("Error", f"Registration failed: {str(e)}")
+             messagebox.showerror("Error", str(e))
 
 
 class App:

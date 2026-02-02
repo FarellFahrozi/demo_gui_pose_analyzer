@@ -84,8 +84,9 @@ class PostureAnalyzerService:
         actual_height_mm = height_cm * 10
         analyzer.calculate_pixel_to_mm_ratio(img.shape[0], person_height_px, actual_height_mm)
 
-        shoulder_analysis = analyzer.analyze_shoulder_imbalance_advanced(keypoints)
-        hip_analysis = analyzer.analyze_hip_imbalance_advanced(keypoints)
+        posture_center_x = analyzer.calculate_posture_center_x(keypoints, img.shape[1])
+        shoulder_analysis = analyzer.analyze_shoulder_imbalance_advanced(keypoints, plumb_line_x=posture_center_x)
+        hip_analysis = analyzer.analyze_hip_imbalance_advanced(keypoints, plumb_line_x=posture_center_x)
         spinal_analysis = analyzer.analyze_spinal_alignment_advanced(keypoints)
         head_analysis = analyzer.analyze_head_alignment_advanced(keypoints)
         lateral_distances = analyzer.analyze_lateral_distances(keypoints)
@@ -112,7 +113,7 @@ class PostureAnalyzerService:
 
         postural_angles = analyzer.analyze_postural_angles(keypoints)
         analysis_results['postural_angles'] = postural_angles
-        analysis_results['posture_center_x'] = analyzer.calculate_posture_center_x(keypoints, img.shape[1])
+        analysis_results['posture_center_x'] = posture_center_x
 
         posture_score = analyzer.calculate_overall_posture_score(analysis_results)
         analysis_results['posture_score'] = posture_score
@@ -125,7 +126,10 @@ class PostureAnalyzerService:
         if detections['all_detections']:
             cls = detections['all_detections'][0]['classification'].lower()
             if any(k in cls for k in ['kiri', 'kanan', 'left', 'right', 'lateral', 'samping']):
-                view_type = 'lateral'
+                # Maintain the detailed classification name (e.g. "samping kanan")
+                view_type = cls
+            elif any(k in cls for k in ['depan', 'belakang', 'front', 'back', 'anterior', 'posterior']):
+                view_type = cls
         analysis_results['view_type'] = view_type
 
         return analysis_results

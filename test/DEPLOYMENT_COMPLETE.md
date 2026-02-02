@@ -67,7 +67,7 @@ http://127.0.0.1:8000/docs
 ### 6. Visualization & Clarity (Phase 18)
 - **Graph Legends**: Clear legends added to all graphs for immediate understanding.
 - **On-Graph Annotations**: Lateral views now feature direct mm measurements on the chart.
-- **Contextual Titles**: Graphs now labeled specifically (Head, Spine, Pelvis, Leg) based on view.
+- **Contextual Titles**: Graphs now labeled specifically (Head, Spine, Pelvic, Leg) based on view.
 - **Refined Status Reports**: Simplified text status indicators for cleaner reports.
 
 ## Technical Highlights
