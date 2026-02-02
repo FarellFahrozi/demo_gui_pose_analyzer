@@ -60,6 +60,22 @@ The value displayed on the "Pelvic Analysis" graph represents the vertical heigh
 *   **Thigh Length**: Euclidian distance between Hip (E) and Knee (F).
 *   **Shin Length**: Euclidian distance between Knee (F) and Ankle (G).
 
+### Knee Condition Logic (Hyper Extended vs Bending)
+To determine if the knee is Hyper Extended or Bending, we compare the horizontal "forward-ness" of the Hip (E), Knee (F), and Ankle (G).
+
+*   **Direction Normalization**:
+    *   **Right View (Facing Right)**: Forward direction is **+X**.
+    *   **Left View (Facing Left)**: Forward direction is **-X**.
+
+*   **Logic**:
+    *   **Hyper Extended Knee**: 
+        *   Condition: `Hip_Forward > Knee_Forward` AND `Ankle_Forward > Knee_Forward`
+        *   Interpretation: The Knee (F) is physically *behind* the Hip-Ankle line.
+    *   **Bending Knee**:
+        *   Condition: `Knee_Forward > Hip_Forward` AND `Knee_Forward > Ankle_Forward`
+        *   Interpretation: The Knee (F) is physically *in front of* the Hip-Ankle line.
+    *   **Normal**: Any other configuration.
+
 ---
 
 ## 4. Graph Visualization

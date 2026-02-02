@@ -125,6 +125,7 @@ The system uses **SQLite** (`kuro_posture.db`) with the following tables:
 - **Geometric View Detection**: Robust Left/Right determination comparing Ear vs Hip keypoints.
 - **Realistic Pelvic Tilt**: Updated logic to use **12° angle** for medically accurate visualization (<100mm height diff).
 - **Symmetric Centering**: Points C and D are now perfectly centered around the Hip (E).
+- **Knee Analysis**: Added "Hyper Extended" vs "Bending" detection based on Hip-Knee-Ankle horizontal alignment.
 - **Documentation**: Detailed formula explanations in [MEDICAL_FORMULAS.md](MEDICAL_FORMULAS.md).
 
 ## Development
