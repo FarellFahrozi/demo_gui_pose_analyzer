@@ -951,25 +951,30 @@ class ResultsScreen(ttk.Frame):
         
         if is_posterior:
              # Posterior View
-             label_n1, label_n2 = "R.Neutral", "L.Neutral"
-             # Side 1 = Right Leg (E) - Uses Left Detection Data
-             leg1_name = "Right Leg"
-             kd1, kf1, kh1 = ld, lf, lh
-             label_hip1, label_knee1, label_ankle1 = "C (R.Femur)", "E (R.Shin)", "G (R.Ankle)"
+             # Side 1 (Left Graph = 4.0) -> Left Leg (D-F-H)
+             # User reported swapped lines. Assuming Model Keypoints are 'Frontal-centric':
+             # 'Right Hip' (rc) is detected on Image Left (which is Anatomical Left in Posterior).
+             # So we use 'Right' keypoints for the Left Leg graph.
+             label_n1, label_n2 = "L.Neutral", "R.Neutral"
              
-             # Side 2 = Left Leg (F) - Uses Right Detection Data
-             leg2_name = "Left Leg"
-             kd2, kf2, kh2 = rc, re, rg
-             label_hip2, label_knee2, label_ankle2 = "D (L.Femur)", "F (L.Shin)", "H (L.Ankle)"
+             # Side 1 = Left Leg (Graphic Left)
+             leg1_name = "Left Leg"
+             kd1, kf1, kh1 = rc, re, rg # Use 'Right' Keypoints (Image Left)
+             label_hip1, label_knee1, label_ankle1 = "D (L.Femur)", "F (L.Shin)", "H (L.Ankle)"
+             
+             # Side 2 = Right Leg (Graphic Right)
+             leg2_name = "Right Leg"
+             kd2, kf2, kh2 = ld, lf, lh # Use 'Left' Keypoints (Image Right)
+             label_hip2, label_knee2, label_ankle2 = "C (R.Femur)", "E (R.Shin)", "G (R.Ankle)"
         else:
              # Anterior View
              label_n1, label_n2 = "R.Neutral", "L.Neutral"
-             # Side 1 = Right Leg
+             # Side 1 (Left Graph) = Right Leg (Image Left)
              leg1_name = "Right Leg"
              kd1, kf1, kh1 = rc, re, rg
              label_hip1, label_knee1, label_ankle1 = "C (R.Femur)", "E (R.Shin)", "G (R.Ankle)"
              
-             # Side 2 = Left Leg
+             # Side 2 (Right Graph) = Left Leg (Image Right)
              leg2_name = "Left Leg"
              kd2, kf2, kh2 = ld, lf, lh
              label_hip2, label_knee2, label_ankle2 = "D (L.Femur)", "F (L.Shin)", "H (L.Ankle)"
@@ -992,9 +997,9 @@ class ResultsScreen(ttk.Frame):
             ax3.plot([c_side1, x1_knee], [9, 5], 'g-', linewidth=3, label=leg1_name)
             ax3.plot([x1_knee, x1_ankle], [5, 1], 'g-', linewidth=3)
             # Text directly on/near point
-            ax3.text(c_side1 - 0.1, 9, 'C', fontsize=10, fontweight='bold', color='green', ha='right', va='center')
-            ax3.text(x1_knee - 0.1, 5, 'E', fontsize=10, fontweight='bold', color='green', ha='right', va='center')
-            ax3.text(x1_ankle - 0.1, 1, 'G', fontsize=10, fontweight='bold', color='green', ha='right', va='center')
+            ax3.text(c_side1 - 0.1, 9, label_hip1.split()[0], fontsize=10, fontweight='bold', color='green', ha='right', va='center')
+            ax3.text(x1_knee - 0.1, 5, label_knee1.split()[0], fontsize=10, fontweight='bold', color='green', ha='right', va='center')
+            ax3.text(x1_ankle - 0.1, 1, label_ankle1.split()[0], fontsize=10, fontweight='bold', color='green', ha='right', va='center')
 
         # LEFT LEG Plotting
         # LEFT LEG Plotting
@@ -1010,9 +1015,9 @@ class ResultsScreen(ttk.Frame):
              ax3.plot(x2_ankle, 1, 'mo', markersize=10, label=label_ankle2)
              ax3.plot([c_side2, x2_knee], [9, 5], 'm-', linewidth=3, label=leg2_name)
              ax3.plot([x2_knee, x2_ankle], [5, 1], 'm-', linewidth=3)
-             ax3.text(c_side2 + 0.1, 9, 'D', fontsize=10, fontweight='bold', color='magenta', ha='left', va='center')
-             ax3.text(x2_knee + 0.1, 5, 'F', fontsize=10, fontweight='bold', color='magenta', ha='left', va='center')
-             ax3.text(x2_ankle + 0.1, 1, 'H', fontsize=10, fontweight='bold', color='magenta', ha='left', va='center')
+             ax3.text(c_side2 + 0.1, 9, label_hip2.split()[0], fontsize=10, fontweight='bold', color='magenta', ha='left', va='center')
+             ax3.text(x2_knee + 0.1, 5, label_knee2.split()[0], fontsize=10, fontweight='bold', color='magenta', ha='left', va='center')
+             ax3.text(x2_ankle + 0.1, 1, label_ankle2.split()[0], fontsize=10, fontweight='bold', color='magenta', ha='left', va='center')
 
         # Add Height Difference Annotations for Frontal View
         if kd1 and kd2:
