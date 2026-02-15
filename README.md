@@ -13,7 +13,7 @@
 
 ## 🌟 Overview
 
-The **KURO Performance AI Postural Assessment System** is a professional-grade clinical tool designed to provide precise anatomical measurements using artificial intelligence. By leveraging a custom **8-point YOLO model**, the system automatically detects key anatomical landmarks to calculate biomechanical metrics in real-time.
+The **KURO Performance AI Postural Assessment System** is a professional-grade clinical tool designed to provide precise anatomical measurements using artificial intelligence. By leveraging a custom **8-point YOLO v11 model**, the system automatically detects key anatomical landmarks to calculate biomechanical metrics in real-time.
 
 ### 🏗️ New Clean Architecture (v2.0 Refactor)
 The application has been refactored into a robust **Client-Server Architecture** to ensure scalability and maintainability:
@@ -57,7 +57,87 @@ The application has been refactored into a robust **Client-Server Architecture**
 
 ---
 
-## 🚀 Quick Start
+## 📋 Cara Pemakaian (User Guide)
+
+Untuk menggunakan sistem ini secara optimal, ikuti langkah-langkah berikut:
+
+### 1. Menjalankan Aplikasi
+Sistem ini terdiri dari dua komponen yang harus dijalankan secara bersamaan:
+
+1.  **Server API**: Jalankan perintah `python run_api.py`. Terminal ini akan menampilkan log request dan status server. Biarkan terminal ini tetap terbuka.
+2.  **Aplikasi Client**: Buka terminal baru dan jalankan `python run_gui.py`. Jendela aplikasi akan muncul.
+
+### 2. Login & Registrasi
+- Saat pertama kali membuka aplikasi, Anda akan diminta untuk **Login**.
+- Jika belum memiliki akun, klik **Daftar** (Register demo account: `admin`/`admin123` jika tersedia, atau buat baru).
+- Data pasien akan tersimpan aman dan terhubung dengan akun Anda.
+
+### 3. Memulai Analisis
+1.  **Input Data Pasien**: 
+    - Masukkan **Nama Pasien** dan **Tinggi Badan (cm)** pada kolom yang tersedia di bagian atas.
+    - Tinggi badan penting untuk kalibrasi pengukuran pixel-ke-milimeter yang akurat.
+2.  **Pilih Gambar**:
+    - Klik tombol **⚙️ ANALYSIS MENU** di pojok kanan atas.
+    - Pilih **"📷 Select Single Image"** untuk analisis satu foto.
+    - Pilih **"📂 Select Batch Folder"** untuk menganalisis seluruh folder foto sekaligus.
+3.  **Proses Analisis**:
+    - Setelah gambar dipilih, preview akan muncul.
+    - Klik tombol **🔍 ANALYZE POSTURE** di bagian bawah.
+    - Tunggu sebentar hingga AI selesai memproses (biasanya < 2 detik).
+4.  **Melihat Hasil**:
+    - Hasil analisis akan ditampilkan dengan overlay grafis pada gambar (garis postur, sudut).
+    - Tabel metrik di sebelah kanan menunjukkan detail angka penyimpangan (misal: Bahu Kiri lebih tinggi 15mm).
+    - Kesimpulan klinis otomatis (Normal/Perlu Perhatian) akan muncul di bawah tabel.
+
+---
+
+## 🔬 Metode Analisis (Analysis Method)
+
+Sistem ini menggunakan pendekatan **Computer Vision** yang digabungkan dengan **Aturan Biomekanik Klinis**:
+
+### 1. Deteksi Titik Anatomis (Keypoint Detection)
+Menggunakan model **YOLOv11 Custom** yang dilatih khusus untuk mendeteksi 8 titik kunci utama tubuh manusia:
+- **Telinga (Ear)**
+- **Bahu (Shoulder)**
+- **Panggul (Hip/Pelvis - ASIS/PSIS)**
+- **Lutut (Knee)**
+- **Pergelangan Kaki (Ankle)**
+
+Model ini mampu mendeteksi orientasi tubuh secara otomatis, apakah menghadap **Depan (Anterior)**, **Belakang (Posterior)**, atau **Samping (Lateral)**.
+
+### 2. Algoritma Biomekanik "Kuro Performance"
+Setelah titik terdeteksi, sistem menerapkan algoritma khusus untuk validasi medis:
+
+*   **View Detection Logic**:
+    *   Membandingkan rasio lebar bahu vs profil samping.
+    *   Mendeteksi keberadaan satu atau dua telinga/mata untuk menentukan arah hadap.
+*   **Koreksi Perspektif Lateral (Side View)**:
+    *   Menerapkan aturan **"Plumb Line"**: Garis vertikal ideal yang menghubungkan Telinga, Bahu, Panggul, Lutut, dan Pergelangan Kaki.
+    *   **Pelvic Alignment**: Memvisualisasikan kemiringan panggul (Anterior Tilt) dengan garis C-D yang dimiringkan 30 derajat sesuai standar biomekanik normal.
+*   **Pengukuran Presisi**:
+    *   Jarak dalam pixel dikonversi ke milimeter (mm) berdasarkan tinggi badan pasien yang diinput.
+    *   Rumus: `Ratio (mm/px) = Tinggi Asli (mm) / Tinggi Terdeteksi (px)`.
+
+---
+
+## 📚 Sumber & Referensi (Sources)
+
+Metode analisis dalam sistem ini didasarkan pada prinsip-prinsip biomekanik postur standar yang digunakan dalam fisioterapi dan performa olahraga:
+
+1.  **Kendall, F. P., et al. (2005).** *Muscles: Testing and Function, with Posture and Pain*. 
+    - Dasar teori untuk "Plumb Line Alignment" pada pandangan lateral.
+    - Referensi untuk penilaian ketidakseimbangan bahu dan panggul.
+2.  **Janda, V. (1983).** *Muscle Function Testing*.
+    - Konsep "Upper & Lower Crossed Syndrome" yang mendasari deteksi Forward Head Posture dan Anterior Pelvic Tilt.
+3.  **Metodologi Internal KURO Performance**:
+    - Adaptasi aturan 30-derajat untuk visualisasi kemiringan panggul pada atlet performa tinggi.
+    - Logika deteksi 8-titik yang disederhanakan untuk efisiensi analisis real-time di lapangan.
+4.  **YOLOv11 Architecture (Ultralytics)**:
+    - State-of-the-art object detection algorithm yang digunakan sebagai backbone AI.
+
+---
+
+## 🚀 Quick Start (Technical Setup)
 
 ### 1. Prerequisites
 - **Python 3.10** or higher.
@@ -104,26 +184,6 @@ class Config:
 
 ---
 
-## 📊 Biomechanical Engine
-
-The system uses a refined **Kuro 8-Point Keypoint Model** to ensure anatomical accuracy:
-
-| Index | Anatomical Landmark | Side |
-| :--- | :--- | :--- |
-| **0 - 3** | Shoulder, Hip, Knee, Ankle | **Right** |
-| **4 - 7** | Shoulder, Hip, Knee, Ankle | **Left** |
-
-### Lateral View Medical Alignment
-For lateral (side) views, the system enforces medical postural theory:
-- **Point E (Pelvic Center)**: Vertically aligned with Shoulder (B) and Knee (F) to form a postural plumb line.
-- **C-D Line (Pelvic)**: Consistently slanted at **30 degrees** (anterior tilt) with Front (D) lower than Back (C).
-- **Line Length**: 450 pixels for clear professional visualization.
-
-> [!NOTE]
-> The skeleton visualization logic automatically detects view types to provide relevant measurements (e.g., Hip-to-Hip for Frontal, specialized alignment for Lateral).
-
----
-
 ## 📂 Project Organization
 
 ```text
@@ -140,14 +200,6 @@ For lateral (side) views, the system enforces medical postural theory:
 │   └── run_*.py         # Entry scripts
 ├── README.md            # Documentation
 ```
-
----
-
-## 📊 Logic Modules
-
-*   **`gui/utils/ui_helpers.py`**: Contains reusable UI elements like `create_rounded_rect` to ensure consistent design.
-*   **`gui/utils/plot_helpers.py`**: Encapsulates all Matplotlib graph generation logic, keeping `results.py` clean and focused on layout.
-*   **`gui/utils/api_client.py`**: The bridge between Client and Server. Handles Login, Registration, and Data fetching.
 
 ---
 
